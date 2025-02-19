@@ -23,6 +23,7 @@ from orthogonium.model_factory.classparam import ClassParam
 from orthogonium.layers.conv.AOC import AdaptiveOrthoConv2d
 from orthogonium.layers.linear import OrthoLinear
 from orthogonium.layers.custom_activations import MaxMin
+from orthogonium.layers import BatchCentering
 from orthogonium.losses import LossXent
 from orthogonium.losses import VRA
 from orthogonium.model_factory.models_factory import (
@@ -79,7 +80,7 @@ class Cifar10DataModule(LightningDataModule):
 
         # Load the dataset
         train_dataset = CIFAR10(
-            root="./data",
+            root="/archive/deel/datasets/pytorch_datasets/cifar10/",
             train=True,
             download=True,
             transform=transform,
@@ -109,7 +110,7 @@ class Cifar10DataModule(LightningDataModule):
 
         # Load the dataset
         val_dataset = CIFAR10(
-            root="./data",
+            root="/archive/deel/datasets/pytorch_datasets/cifar10/",
             train=False,
             download=True,
             transform=transform,
@@ -134,14 +135,14 @@ class ClassificationLightningModule(LightningModule):
             n_classes=10,
             conv=ClassParam(
                 AdaptiveOrthoConv2d,
-                bias=True,
+                bias=False,
                 padding_mode="circular",
                 kernel_size=3,
                 padding=1,
             ),
             act=ClassParam(MaxMin),
             lin=ClassParam(OrthoLinear, bias=True),
-            norm=None,
+            norm=ClassParam(BatchCentering),
         )
         self.criteria = LossXent(10, offset=1.5 * math.sqrt(2), temperature=0.25)
         self.train_acc = torchmetrics.Accuracy(
@@ -301,7 +302,7 @@ def train():
     # )
     trainer = Trainer(
         accelerator="gpu",
-        devices=-1,  # GPUs per node
+        devices=1,  # GPUs per node
         num_nodes=1,  # Number of nodes
         strategy="ddp",  # Distributed strategy
         precision="bf16-mixed",
@@ -314,7 +315,7 @@ def train():
             # checkpoint_callback,
         ],
     )
-    summary(classification_module, input_size=(1, 3, 32, 32))
+    summary(classification_module.eval(), input_size=(1, 3, 32, 32))
 
     trainer.fit(classification_module, data_module)
     # save the model
