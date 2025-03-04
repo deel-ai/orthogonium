@@ -73,8 +73,8 @@ class BatchCentering(nn.Module):
                 self.running_num_batches += 1.0
 
             if dist.is_initialized():
-                dist.all_reduce(self.running_mean, op=dist.ReduceOp.SUM)
-                dist.all_reduce(self.running_num_batches, op=dist.ReduceOp.SUM)
+                dist.all_reduce(self.running_mean.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(self.running_num_batches.detach(), op=dist.ReduceOp.SUM)
                 self.running_mean /= dist.get_world_size()
         else:
             mean = self.get_running_mean(self.training)
@@ -244,6 +244,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             self.normalize = True
         self.eps = eps
         self.first = True
+
     def reset_states(self):
         self.running_mean.zero_()
         self.running_num_batches.zero_()
@@ -290,14 +291,14 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                     self.current_var = current_var #  in training use the current lambda
                     self.running_var += self.current_var
             if dist.is_initialized():
-                dist.all_reduce(self.running_mean, op=dist.ReduceOp.SUM)
-                dist.all_reduce(self.running_num_batches, op=dist.ReduceOp.SUM)
+                dist.all_reduce(self.running_mean.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(self.running_num_batches.detach(), op=dist.ReduceOp.SUM)
                 #divison by world size included in num_batches count
                 #self.running_mean /= dist.get_world_size()
                 if self.normalize:
-                    dist.all_reduce(self.running_var, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(self.running_var.detach(), op=dist.ReduceOp.SUM)
                     #divison by world size included in num_batches count
-                    dist.all_reduce(self.current_var, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(self.current_var.detach(), op=dist.ReduceOp.SUM)
                     self.current_var /= dist.get_world_size()
             #print("training mean", mean_shape, mean.view(mean_shape).flatten().float().detach().cpu().numpy()[0:3],self.get_running_mean(False).flatten().detach().cpu().numpy()[0:3], self.running_num_batches.cpu().numpy(),)
             #print("training var", self.current_var.shape, self.current_var.flatten()[0:3].detach().cpu().numpy(),self.current_var.flatten().max().detach().cpu().numpy(),(self.running_var.flatten()[0:3]/self.running_num_batches).detach().cpu().numpy())
