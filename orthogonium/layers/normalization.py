@@ -222,6 +222,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         num_features: int = 1,
         dim: Optional[tuple] = None,
         momentum: float = 0.05,
+        centering: bool = True,
         bias: bool = True,
         factory: Optional[SharedLipFactory] = None,
         eps: float = 1e-5,
@@ -231,6 +232,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         self.dim = dim
         self.momentum = momentum
         self.num_features = num_features
+        self.centering = centering
         self.register_buffer("running_mean", torch.zeros((num_features,)))
         self.register_buffer("running_num_batches", torch.zeros((1,)))
         if bias:
@@ -277,7 +279,10 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             if self.first:
                 self.reset_states()
                 self.first = False
-            mean = x.mean(dim=self.dim)
+            if self.centering:
+                mean = x.mean(dim=self.dim)
+            else:
+                mean = torch.zeros((self.num_features,)).to(x.device)
             if self.normalize:
                 current_var = x.var(dim=self.dim)
                 # constant case don't divide by zero
