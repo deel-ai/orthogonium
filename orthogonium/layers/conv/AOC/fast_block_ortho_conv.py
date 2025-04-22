@@ -235,7 +235,7 @@ class BCOPTrivializer(nn.Module):
         # 2x2 convs in pairs and apply the block conv operator to each pair
         # until we have a single conv. If k-1 is a power of two this algorithm
         # run in log(k-1) steps. (naive associative scan algorithm)
-        while c22.shape[0] % 2 == 0:
+        while (c22.shape[0] % 2 == 0) and (c22.shape[0] > 1):
             mid = c22.shape[0] // 2
             c22 = fast_batched_matrix_conv(c22[:mid], c22[mid:], self.groups)
         # we finally compose the 1x1 conv with the kxk conv
