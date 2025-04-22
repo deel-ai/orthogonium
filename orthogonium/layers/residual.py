@@ -26,7 +26,7 @@ class L2NormResidual(nn.Module):
         # apply function
         out = self.fn(x)
         # concat and return
-        return torch.sqrt(x**2 + out**2 + self.eps)
+        return torch.sqrt(0.5 * x**2 + 0.5 * out**2 + self.eps)
 
 
 class AdditiveResidual(nn.Module):
