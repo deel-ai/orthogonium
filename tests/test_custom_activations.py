@@ -2,6 +2,7 @@ import pytest
 import torch
 from orthogonium.layers.custom_activations import (
     Abs,
+    SoftHuber,
     MaxMin,
     HouseHolder,
     HouseHolder_Order_2,
@@ -23,6 +24,30 @@ def test_abs_shapes():
     x = torch.randn(2, 3, 4, 5)  # Random 4D tensor
     y = abs_layer(x)
     assert y.shape == x.shape, "Output shape mismatch for Abs function"
+
+
+# ------------------------- SoftHuber Tests -------------------------
+
+
+def test_soft_huber_output():
+    delta = 0.5
+    soft_huber_layer = SoftHuber(delta=delta)
+    x = torch.tensor([-10.0, 0.0, 10.0, -0.01])
+    y = soft_huber_layer(x)
+    expected_output = torch.tensor(
+        [10.0 - delta, 0.0, 10.0 - delta, (-(0.01**2)) / (2 * delta)]
+    )
+    assert torch.allclose(
+        y, expected_output, atol=0.01, rtol=0.01
+    ), "SoftHuber function is incorrect"
+
+
+def test_soft_huber_shapes():
+    delta = 0.5
+    soft_huber_layer = SoftHuber(delta=delta)
+    x = torch.randn(2, 3, 4, 5)  # Random 4D tensor
+    y = soft_huber_layer(x)
+    assert y.shape == x.shape, "Output shape mismatch for SoftHuber function"
 
 
 # ------------------------- MaxMin Tests -------------------------
@@ -94,15 +119,16 @@ def test_householder_order2_invalid_channels():
 
 # ------------------------- Lipschitz Property Tests -------------------------
 @pytest.mark.parametrize(
-    "layer_fn, channels",
+    "layer_fn, channels, orthogonal",
     [
-        (Abs, None),
-        (lambda: MaxMin(axis=1), None),
-        (lambda: HouseHolder(channels=4), 4),
-        (lambda: HouseHolder_Order_2(channels=4), 4),
+        (Abs, None, True),
+        (SoftHuber, None, False),
+        (lambda: MaxMin(axis=1), None, True),
+        (lambda: HouseHolder(channels=4), 4, True),
+        (lambda: HouseHolder_Order_2(channels=4), 4, True),
     ],
 )
-def test_lipschitz_property(layer_fn, channels):
+def test_lipschitz_property(layer_fn, channels, orthogonal):
     """
     Tests if the layer satisfies the 1-Lipschitz property.
     """
@@ -136,9 +162,10 @@ def test_lipschitz_property(layer_fn, channels):
     assert (
         singular_values.max() <= 1 + 1e-4
     ), f"{layer.__class__.__name__} is not 1-Lipschitz"
-    assert (
-        singular_values.min() >= 1 - 1e-4
-    ), f"{layer.__class__.__name__} is not orthogonal"
+    if orthogonal:
+        assert (
+            singular_values.min() >= 1 - 1e-4
+        ), f"{layer.__class__.__name__} is not orthogonal"
 
 
 # ------------------------- Run All Tests -------------------------

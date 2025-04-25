@@ -24,6 +24,27 @@ class Abs(nn.Module):
         return torch.abs(z)
 
 
+class SoftHuber(nn.Module):
+    def __init__(self, delta=0.05):
+        """
+        Initializes the SoftHuber class.
+        This class implements the Soft Huber loss function, which is a
+        differentiable approximation of the Huber loss. The Soft Huber loss
+        behaves like abs(x) when the absolute error is large and like x**2
+        when the absolute error is small. The transition between these two
+        behaviors is controlled by the delta parameter.
+
+        Parameters:
+            delta (float): The threshold at which to switch between L1 and L2 loss.
+        """
+        super(SoftHuber, self).__init__()
+        self.delta = delta
+
+    def forward(self, z):
+        # we dont multiply by delta**2 in order to have a Lipschitz constant of 1
+        return self.delta * (torch.sqrt(1 + (z / self.delta) ** 2) - 1)
+
+
 class MaxMin(nn.Module):
     def __init__(self, axis=1):
         """
