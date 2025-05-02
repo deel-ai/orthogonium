@@ -6,6 +6,7 @@ from orthogonium.layers.conv.AOC.fast_block_ortho_conv import (
     transpose_kernel,
     fast_matrix_conv,
 )
+from orthogonium.layers.conv.init import conv_orthogonal_
 
 
 def safe_inv(x):
@@ -15,25 +16,51 @@ def safe_inv(x):
     return x_inv
 
 
-class AOLReparametrizer(nn.Module):
-    def __init__(self, nb_features, groups):
-        super(AOLReparametrizer, self).__init__()
-        self.nb_features = nb_features
+class MultiStepAOLReparametrizer(nn.Module):
+    def __init__(self, nb_features, groups, niter=4):
+        super(MultiStepAOLReparametrizer, self).__init__()
         self.groups = groups
+        self.nb_features = nb_features
+        self.niter = niter
         self.q = nn.Parameter(torch.ones(nb_features, 1, 1, 1))
 
     def forward(self, kernel):
-        ktk = fast_matrix_conv(
-            transpose_kernel(kernel, self.groups, flip=True), kernel, self.groups
-        )
-        ktk = torch.abs(ktk)
+        co, cig, ks, ks2 = kernel.shape
+        if co // self.groups >= cig:
+            kernel = transpose_kernel(kernel, self.groups, flip=True)
+        kkt = kernel
+        log_curr_norm = 0
+        for i in range(self.niter):
+            kkt_norm = kkt.norm().detach()
+            kkt = kkt / kkt_norm
+            log_curr_norm = 2 * (log_curr_norm + kkt_norm.log())
+            kkt = fast_matrix_conv(
+                transpose_kernel(kkt, self.groups, flip=True), kkt, self.groups
+            )
+
+        inverse_power = 2 ** (-self.niter)
+        t = torch.abs(kkt)
         q = torch.exp(self.q)
         q_inv = torch.exp(-self.q)
-        t = (q_inv * ktk * q).sum((1, 2, 3))
-        t = safe_inv(torch.sqrt(t))
+        t = q_inv * t * q
+        t = t.sum((1, 2, 3)).pow(inverse_power)
+        norm = torch.exp(log_curr_norm * inverse_power)
+        t = t * norm
         t = t.reshape(-1, 1, 1, 1)
-        kernel = kernel * t
+        kernel = kernel / t
+        if co // self.groups >= cig:
+            kernel = transpose_kernel(kernel, self.groups, flip=True)
         return kernel
+
+    def right_inverse(self, kernel):
+        return kernel
+
+    def reset_parameters(self):
+        """
+        Resets the parameters of the reparametrizer.
+        """
+        # Reset the q parameter to its initial value
+        self.q.data.fill_(1.0)
 
 
 class AOLConv2D(nn.Conv2d):
@@ -51,6 +78,7 @@ class AOLConv2D(nn.Conv2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
+        niter=1,
     ):
         """
         Almost-Orthogonal Convolution layer. This layer implements the method proposed in [1] to enforce
@@ -89,14 +117,34 @@ class AOLConv2D(nn.Conv2d):
             device=device,
             dtype=dtype,
         )
+        self.niter = niter
+
         parametrize.register_parametrization(
             self,
             "weight",
-            AOLReparametrizer(
-                out_channels,
+            MultiStepAOLReparametrizer(
+                min(out_channels, in_channels),
                 groups=groups,
+                niter=niter,
             ),
         )
+
+    def reset_parameters(self) -> None:
+        r"""Resets parameters of the module. This includes the weight and bias
+        parameters, if they are used.
+        """
+        super().reset_parameters()
+        # # Reset the parametrization
+        # init kernel using the orthogonal kernel
+        if not (
+            self.in_channels // self.groups == 0
+            and self.out_channels // self.groups == 0
+        ):
+            self.kernel = conv_orthogonal_(
+                self.weight,
+                stride=self.stride,
+                groups=self.groups,
+            )
 
 
 class AOLConvTranspose2D(nn.ConvTranspose2d):
@@ -115,6 +163,7 @@ class AOLConvTranspose2D(nn.ConvTranspose2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
+        niter=1,
     ):
         """
         Almost-Orthogonal Convolution layer. This layer implements the method proposed in [1] to enforce
@@ -155,10 +204,13 @@ class AOLConvTranspose2D(nn.ConvTranspose2d):
             device=device,
             dtype=dtype,
         )
+        self.niter = niter
 
         # Register the same AOLReparametrizer
         parametrize.register_parametrization(
             self,
             "weight",
-            AOLReparametrizer(in_channels, groups=groups),
+            MultiStepAOLReparametrizer(
+                min(out_channels, in_channels), groups=groups, niter=niter
+            ),
         )
