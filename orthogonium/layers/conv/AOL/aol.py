@@ -16,6 +16,27 @@ def safe_inv(x):
     return x_inv
 
 
+class AOLReparametrizer(nn.Module):
+    def __init__(self, nb_features, groups):
+        super(AOLReparametrizer, self).__init__()
+        self.nb_features = nb_features
+        self.groups = groups
+        self.q = nn.Parameter(torch.ones(nb_features, 1, 1, 1))
+
+    def forward(self, kernel):
+        ktk = fast_matrix_conv(
+            transpose_kernel(kernel, self.groups, flip=True), kernel, self.groups
+        )
+        ktk = torch.abs(ktk)
+        q = torch.exp(self.q)
+        q_inv = torch.exp(-self.q)
+        t = (q_inv * ktk * q).sum((1, 2, 3))
+        t = safe_inv(torch.sqrt(t))
+        t = t.reshape(-1, 1, 1, 1)
+        kernel = kernel * t
+        return kernel
+
+
 class MultiStepAOLReparametrizer(nn.Module):
     def __init__(self, nb_features, groups, niter=4):
         super(MultiStepAOLReparametrizer, self).__init__()
