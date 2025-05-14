@@ -11,17 +11,17 @@
     <a href="#">
         <img src="https://img.shields.io/badge/Pytorch-2.0+-00008b">
     </a>
-    <a href="https://github.com/thib-s/orthogonium/actions/workflows/linters.yml">
-        <img alt="PyLint" src="https://github.com/thib-s/orthogonium/actions/workflows/linters.yml/badge.svg">
+    <a href="https://github.com/deel-ai/orthogonium/actions/workflows/linters.yml">
+        <img alt="PyLint" src="https://github.com/deel-ai/orthogonium/actions/workflows/linters.yml/badge.svg">
     </a>
-    <a href='https://coveralls.io/github/thib-s/orthogonium?branch=main'>
-        <img src='https://coveralls.io/repos/github/thib-s/orthogonium/badge.svg?branch=main&kill_cache=1' alt='Coverage Status' />
+    <a href='https://coveralls.io/github/deel-ai/orthogonium?branch=main'>
+        <img src='https://coveralls.io/repos/github/deel-ai/orthogonium/badge.svg?branch=main&kill_cache=1' alt='Coverage Status' />
     </a>
-    <a href="https://github.com/thib-s/orthogonium/actions/workflows/tests.yml">
-        <img alt="Tests" src="https://github.com/thib-s/orthogonium/actions/workflows/tests.yml/badge.svg">
+    <a href="https://github.com/deel-ai/orthogonium/actions/workflows/tests.yml">
+        <img alt="Tests" src="https://github.com/deel-ai/orthogonium/actions/workflows/tests.yml/badge.svg">
     </a>
-    <a href="https://github.com/thib-s/orthogonium/actions/workflows/python-publish.yml">
-        <img alt="Pypi" src="https://github.com/thib-s/orthogonium/actions/workflows/python-publish.yml/badge.svg">
+    <a href="https://github.com/deel-ai/orthogonium/actions/workflows/python-publish.yml">
+        <img alt="Pypi" src="https://github.com/deel-ai/orthogonium/actions/workflows/python-publish.yml/badge.svg">
     </a>
     <a href="https://pepy.tech/project/orthogonium">
         <img alt="Pepy" src="https://static.pepy.tech/badge/orthogonium">
@@ -31,7 +31,7 @@
     </a>
     <a href="https://arxiv.org/abs/2501.07930">
         <img src="https://img.shields.io/badge/arXiv-2501.07930-b31b1b.svg">
-    <a href="https://thib-s.github.io/orthogonium/">
+    <a href="https://deel-ai.github.io/orthogonium/">
         <img alt="Documentation" src="https://img.shields.io/badge/Docs-here-0000ff">
     </a>
 </div>
@@ -44,7 +44,7 @@ build orthogonal layers, with a focus on convolutional layers . We noticed that 
 significant role in the final performance : a more efficient implementation 
 allows larger networks and more training steps within the same compute 
 budget. So our implementation differs from original papers in order to 
-be faster, to consume less memory or be more flexible. Feel free to read the [documentation](https://thib-s.github.io/orthogonium/)!
+be faster, to consume less memory or be more flexible. Feel free to read the [documentation](https://deel-ai.github.io/orthogonium/)!
 
 # 📃 What is included in this library ?
 
@@ -130,7 +130,7 @@ pip install orthogonium
 If you wish to deep dive in the code and edit your local version, you can clone the repository and run the following command 
 to install it locally:
 ```
-git clone git@github.com:thib-s/orthogonium.git
+git clone git@github.com:deel-ai/orthogonium.git
 pip install -e .
 ```
 
