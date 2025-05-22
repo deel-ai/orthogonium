@@ -1,5 +1,6 @@
 import warnings
 from typing import Union
+import math
 
 import numpy as np
 from torch import nn as nn
@@ -12,6 +13,7 @@ from orthogonium.layers.conv.AOC.fast_block_ortho_conv import (
 from orthogonium.layers.conv.AOC.fast_block_ortho_conv import conv_singular_values_numpy
 from orthogonium.layers.conv.AOC.fast_block_ortho_conv import fast_matrix_conv
 from orthogonium.layers.conv.AOC.rko_conv import attach_rko_weight
+from orthogonium.layers.conv.AOC.padding_convtranspose import PaddingConvTranspose2d
 from orthogonium.reparametrizers import OrthoParams
 
 
@@ -113,7 +115,7 @@ class BcopRkoConv2d(nn.Conv2d):
                 ).contiguous()
 
 
-class BcopRkoConvTranspose2d(nn.ConvTranspose2d):
+class BcopRkoConvTranspose2d(PaddingConvTranspose2d):
     def __init__(
         self,
         in_channels: int,

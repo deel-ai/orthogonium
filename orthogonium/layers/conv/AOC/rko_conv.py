@@ -8,6 +8,7 @@ import torch.nn.utils.parametrize as parametrize
 from torch.nn.common_types import _size_2_t
 
 from orthogonium.layers.conv.AOC.fast_block_ortho_conv import conv_singular_values_numpy
+from orthogonium.layers.conv.AOC.padding_convtranspose import PaddingConvTranspose2d
 from orthogonium.reparametrizers import OrthoParams
 
 
@@ -152,7 +153,7 @@ class RKOConv2d(nn.Conv2d):
         )
 
 
-class RkoConvTranspose2d(nn.ConvTranspose2d):
+class RkoConvTranspose2d(PaddingConvTranspose2d):
     def __init__(
         self,
         in_channels: int,

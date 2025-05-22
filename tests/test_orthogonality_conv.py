@@ -64,6 +64,8 @@ def check_orthogonal_layer(
     expected_kernel_shape,
     tol=5e-4,
     sigma_min_requirement=0.95,
+    check_same_padding= False,
+    stride = 1
 ):
     # fixing seeds for reproducibility
     torch.manual_seed(0)
@@ -90,6 +92,13 @@ def check_orthogonal_layer(
         pytest.fail(
             f"BCOP weight has incorrect shape: {orthoconv.weight.shape} vs {(output_channels, input_channels // groups, kernel_size, kernel_size)}"
         )
+    # check that the output shape is correct
+    if check_same_padding:
+        if output.shape[1:] != (output_channels, imsize*stride, imsize*stride):
+            pytest.fail(
+                f"BCOP output has incorrect shape: {output.shape[1:]} vs {(output_channels, imsize*stride, imsize*stride)}"
+            )
+
     # Test singular_values function
     sigma_max, stable_rank = get_conv_sv(
         orthoconv,

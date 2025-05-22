@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.utils.parametrize as parametrize
 from torch.nn.common_types import _size_2_t
 
+from orthogonium.layers.conv.AOC.padding_convtranspose import PaddingConvTranspose2d
 from orthogonium.reparametrizers import L2Normalize
 from orthogonium.reparametrizers import OrthoParams
 
@@ -405,7 +406,7 @@ class FastBlockConv2d(nn.Conv2d):
         )
 
 
-class FastBlockConvTranspose2D(nn.ConvTranspose2d):
+class FastBlockConvTranspose2D(PaddingConvTranspose2d):
     def __init__(
         self,
         in_channels: int,
