@@ -129,6 +129,7 @@ class SharedLipFactory:
         if num_batches == 0:
             return torch.ones((1,))
         var = (var_sum - (mean_sum*mean_sum))*var_factor
+        print(int(os.environ["LOCAL_RANK"]), "var_factor", var_factor)
         print("var" , var)
         var  = torch.where(var < self.eps, 
                                         torch.ones(var.shape).to(var.device), 
@@ -354,6 +355,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                 if self.normalize:
                     #dist.all_reduce(self.running_var.detach(), op=dist.ReduceOp.SUM)
                     dist.all_reduce(self.running_meansq.detach(), op=dist.ReduceOp.SUM)
+                    dist.all_reduce(self.running_mean_sample_per_batches.detach(), op=dist.ReduceOp.SUM)
                     #divison by world size included in num_batches count
                     #dist.all_reduce(self.current_var.detach(), op=dist.ReduceOp.SUM)
                     #self.current_var /= dist.get_world_size()
