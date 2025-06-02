@@ -33,6 +33,8 @@ class BatchCentering(nn.Module):
         super(BatchCentering, self).__init__()
         self.dim = dim
         self.num_features = num_features
+        self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
+        self.register_buffer("num_batches", torch.zeros((1,)))
         self.register_buffer("running_mean", torch.zeros((num_features,)))
         self.register_buffer("running_num_batches", torch.zeros((1,)))
         if bias:
@@ -51,12 +53,15 @@ class BatchCentering(nn.Module):
             self.running_mean = self.running_mean/self.running_num_batches
             self.running_num_batches = self.running_num_batches.zero_()+1.0
 
-    def get_running_mean(self,training=False):
+    def get_running_mean(self,training=False, update = True):
+        """Retrieve the running mean in eval mode."""
+        """ If update is True, update the running values"""
+        #print("get_running_mean", self.running_mean, self.running_num_batches)
         assert training == False, "Only in eval mode"
         # case asking for running mean before a step
         if self.running_num_batches == 0: 
             return torch.zeros(self.running_mean.shape).to(self.running_mean.device)
-        if self.running_num_batches > 1:
+        if update and (self.running_num_batches > 1):
             self.update_running_values()
         return self.running_mean/self.running_num_batches
     
@@ -68,15 +73,23 @@ class BatchCentering(nn.Module):
             if self.first:
                 self.reset_states()
                 self.first = False
+            # compute local mean (on batch of a single GPU)
             mean = x.mean(dim=self.dim)
-            with torch.no_grad():
-                self.running_mean += mean
-                self.running_num_batches += 1.0
-
+            self.agrregated_mean.copy_(mean)
+            # on a single GPU this value is always 1
+            self.num_batches = self.num_batches.zero_() + 1.0
+            # for multiGPU aggregate mean and num_batches
             if dist.is_initialized():
+                dist.all_reduce(self.agrregated_mean.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(self.num_batches.detach(), op=dist.ReduceOp.SUM)
+            with torch.no_grad():
+                self.running_mean += self.agrregated_mean
+                self.running_num_batches += self.num_batches
+
+            '''if dist.is_initialized():
                 dist.all_reduce(self.running_mean.detach(), op=dist.ReduceOp.SUM)
                 dist.all_reduce(self.running_num_batches.detach(), op=dist.ReduceOp.SUM)
-                self.running_mean /= dist.get_world_size()
+                self.running_mean /= dist.get_world_size()'''
         else:
             mean = self.get_running_mean(self.training)
         if self.bias is not None:
@@ -103,34 +116,45 @@ class SharedLipFactory:
         module.register_buffer("current_"+buffer_name, current_buffer)
         self.buffers_name2module[buffer_name].append(module)
 
-    def get_var_value(self,module,training, current_mean = None, currant_sample_num = None):
-        """Retrieve the current value of a module shared buffers."""
+    def get_var_value(self,module,training, current_mean = None, current_sample_num = None, update=True):
+        """Retrieve the current variance either local or global."""
+        """ current_mean and current_sample_num are required in training mode (for local variance)"""
+        """update is only for unit testing (getting values without averaging)"""
         assert len(self.buffers_name2module) == 1, "Only one buffer type is supported"
         buffer_name = list(self.buffers_name2module.keys())[0]
         if training:
+            # rectified local variance using local buffers: 
+            # var_sum is sum_on_batch(x_i^2)/current_sample_num with current_sample_num batch size
+            # mean_sum is sum_on_batch(x_i)/current_sample_num
+            # variance = (var_sum - (mean_sum*mean_sum))*current_sample_num/(current_sample_num-1)
             var_sum = getattr(module,"current_"+buffer_name)
             mean_sum = current_mean #getattr(module,"current_mean")
             assert mean_sum is not None, "current_mean should be provided in training mode"
-            assert currant_sample_num is not None, "currant_sample_num should be provided in training mode" 
-            var_factor = currant_sample_num/(currant_sample_num -1)
+            assert current_sample_num is not None, "current_sample_num should be provided in training mode" 
+            var_factor = current_sample_num/(current_sample_num -1)
             #print(int(os.environ["LOCAL_RANK"])," training : current_"+buffer_name,var_sum)
             num_batches = 1.0
         else:
-            mean_sum = module.get_running_mean() #update variables in test mode
-            var_sum = getattr(module,"running_"+buffer_name)
+            # rectified variance using running buffers: 
+            # var_sum is sum_on_epoch(x_i^2)/total_num_samples with total_num_samples number of samples
+            # mean_sum is sum_on_epoch(x_i)/total_num_samples
+            # variance = (var_sum - (mean_sum*mean_sum))*total_num_samples/(total_num_samples-1)
+      
+            mean_sum = module.get_running_mean(update = update)
             num_batches = getattr(module,"running_num_batches")
-            #mean_sample_per_batches = getattr(module,"running_mean_sample_per_batches")
-            #print(mean_sample_per_batches, num_batches)
+            # Need to divide by num_batches to get the average on epoch with multigpu
+            var_sum = getattr(module,"running_"+buffer_name)/num_batches
             total_num_samples = getattr(module,"total_num_samples")
             var_factor = total_num_samples/(total_num_samples-1)
+            #print("var_sum", var_sum, "mean_sum", mean_sum, "num_batches", num_batches, "total_num_samples", total_num_samples)
             #var_factor = mean_sample_per_batches*num_batches/(mean_sample_per_batches*num_batches-1)
             #mean_factor = mean_sample_per_batches*num_batches/(mean_sample_per_batches*num_batches-1)
             #print(int(os.environ["LOCAL_RANK"])," test : current_"+buffer_name,var_sum)
         if num_batches == 0:
             return torch.ones((1,))
         var = (var_sum - (mean_sum*mean_sum))*var_factor
-        print(int(os.environ["LOCAL_RANK"]), "var_factor", var_factor)
-        print("var" , var)
+        #print(int(os.environ["LOCAL_RANK"]), "var_factor", var_factor)
+        #print("var" , var)
         var  = torch.where(var < self.eps, 
                                         torch.ones(var.shape).to(var.device), 
                                         var)
@@ -155,14 +179,18 @@ class ScaledLipschitzModule(abc.ABC):
         self.factory = factory
         # factor name:
         self.factor_name = factor_name
-    def get_scaling_factor(self, training: bool= False, current_mean = None, currant_sample_num = None):
-        var = self.get_variance_factor(training, current_mean, currant_sample_num)
+
+    """Retrieve the scaling_factor of the layer (max(sqrt(variance))."""
+    """ current_mean and current_sample_num are required in training mode (for local variance)"""
+    """ update is only for unit testing (getting values without averaging)"""
+    def get_scaling_factor(self, training: bool= False, current_mean = None, current_sample_num = None, update=True):
+        var = self.get_variance_factor(training, current_mean, current_sample_num, update=update)
         return var.sqrt()
-    def get_variance_factor(self, training: bool, current_mean = None, currant_sample_num = None):
+    def get_variance_factor(self, training: bool, current_mean = None, current_sample_num = None, update=True):
         if self.factory is None:
             return torch.ones((1,))
         else:
-            return self.factory.get_var_value(self,training, current_mean, currant_sample_num)
+            return self.factory.get_var_value(self,training, current_mean, current_sample_num, update=update)
 
     @abc.abstractmethod
     def vanilla_export(self, lambda_cumul):
@@ -255,6 +283,10 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         self.momentum = momentum
         self.num_features = num_features
         self.centering = centering
+        # register for saving the local mean on batch
+        self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
+        self.register_buffer("num_batches", torch.zeros((1,)))
+        # register for accumulating the running mean over epoch and GPU
         self.register_buffer("running_mean", torch.zeros((num_features,)))
         self.register_buffer("running_num_batches", torch.zeros((1,)))
         if bias:
@@ -263,15 +295,20 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             self.register_parameter("bias", None)
         self.normalize = False
         if self.factory is not None:
-            #self.factory.get_shared_buffer(self, "var", (num_features,))
+            # register current_meansq for saving the local mean of square  on batch
+            # register current_meansq for saving the  running mean of square on epoch
             self.factory.get_shared_buffer(self, "meansq", (num_features,))
             self.var_ones = torch.ones((num_features,))
+            # registers for storing the total number samples in the epoch
+            # Need two buffers to keep the total number when averging at the end of the epoch 
+            # the epoch average values will be considered as representing one batc only for the next epoch
             self.register_buffer("running_mean_sample_per_batches", torch.zeros((1,)))
             self.register_buffer("total_num_samples", torch.zeros((1,)))
             self.normalize = True
         self.eps = eps
         self.first = True
 
+    # Reset the running statistics
     def reset_states(self):
         self.running_mean.zero_()
         self.running_num_batches.zero_()
@@ -283,22 +320,28 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             self.var_ones = self.var_ones.to(self.running_mean.device)
 
     #compute average of running values
+    # divide running_mean and running_meansq by running_num_batches
+    # keep the total_num_samples for rectified variance 
+    # update running_mean_sample_per_batches as the average number of samples per batch
+    # update running_num_batches to 1.0 (as a batch tha represents theprevious epochs -to forget while learning)
     def update_running_values(self):
         if self.running_num_batches>1:
             self.running_mean = self.running_mean/self.running_num_batches        
             if self.normalize:
-                #self.running_var = self.running_var/self.running_num_batches
                 self.running_meansq = self.running_meansq/self.running_num_batches
                 self.total_num_samples = self.running_mean_sample_per_batches 
                 self.running_mean_sample_per_batches = self.running_mean_sample_per_batches/self.running_num_batches
             self.running_num_batches = self.running_num_batches.zero_()+1.0
 
-    def get_running_mean(self,training=False):
+    # retrieve the running mean in eval mode
+    # if update is True, update the running values
+    def get_running_mean(self,training=False, update = True):
         assert training == False, "Only in eval mode"
         # case asking for running mean before a step
+        #print("get_running_mean", self.running_mean, self.running_num_batches)
         if self.running_num_batches == 0: 
             return torch.zeros(self.running_mean.shape).to(self.running_mean.device)
-        if self.running_num_batches > 1:
+        if update and (self.running_num_batches > 1):
             self.update_running_values()
         else:    
             if self.normalize:
@@ -312,18 +355,23 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         mean_shape = (1, -1) + (1,) * (len(x.shape) - 2)
         num_elements = x[:,0].numel()
         if self.training:
-            #print(int(os.environ["LOCAL_RANK"])," input " ,x)
+            #print(int(os.environ["LOCAL_RANK"])," input " ,x.shape)
+            # on first batch initalize variables
             if self.first:
                 self.reset_states()
                 self.first = False
+            # compute local mean (on batch of a single GPU)
             if self.centering:
                 mean = x.mean(dim=self.dim)
             else:
                 mean = torch.zeros((self.num_features,)).to(x.device)
+            self.agrregated_mean.copy_(mean)
+            # compute local mean square (on batch of a single GPU)
             if self.normalize:
                 xsq = x*x
                 current_meansq = xsq.mean(dim=self.dim)
-                test_var = x.var(dim=self.dim)
+                #test_var = x.var(dim=self.dim)
+                self.current_meansq.copy_(current_meansq)
                 '''
                 print(x)
                 print(mean)
@@ -335,37 +383,48 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                 '''current_var = torch.where(current_var < self.eps, 
                                         self.var_ones, 
                                         current_var)'''
-            with torch.no_grad():
-                self.running_mean += mean
-                self.running_num_batches += 1.0
-                if self.normalize:
-                    self.current_meansq = current_meansq #  in training use the current lambda
-                    #self.current_var = current_var #  in training use the current lambda
-                    self.running_meansq += self.current_meansq
-                    #self.running_var += self.current_var
-                    self.running_mean_sample_per_batches += num_elements #x.shape[0]
+            # on a single GPU this value is always 1
+            self.num_batches = self.num_batches.zero_() + 1.0
+
+            # for multiGPU aggregate mean, mean square and num_batches
             if dist.is_initialized():
-                print("dist training", self.running_mean.shape, self.running_num_batches.shape)
-                print("dist training", self.running_mean, self.running_num_batches)
-                dist.all_reduce(self.running_mean.detach(), op=dist.ReduceOp.SUM)
-                dist.all_reduce(self.running_num_batches.detach(), op=dist.ReduceOp.SUM)
-                print("dist reduced", self.running_mean, self.running_num_batches)
+                #print("dist training", mean.shape, self.num_batches)
+                #print("dist training", mean, self.num_batches)
+                dist.all_reduce(self.agrregated_mean.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(self.num_batches.detach(), op=dist.ReduceOp.SUM)
+                #print("dist reduced", mean, self.num_batches,self.local_mean)
                 #divison by world size included in num_batches count
                 #self.running_mean /= dist.get_world_size()
                 if self.normalize:
                     #dist.all_reduce(self.running_var.detach(), op=dist.ReduceOp.SUM)
-                    dist.all_reduce(self.running_meansq.detach(), op=dist.ReduceOp.SUM)
-                    dist.all_reduce(self.running_mean_sample_per_batches.detach(), op=dist.ReduceOp.SUM)
+                    #print("dist training current_meansq", current_meansq, self.running_mean_sample_per_batches)
+                    dist.all_reduce(current_meansq.detach(), op=dist.ReduceOp.SUM)
+                    #dist.all_reduce(self.running_mean_sample_per_batches.detach(), op=dist.ReduceOp.SUM)
+                    #print("dist reduced current_meansq", current_meansq, self.running_mean_sample_per_batches)
                     #divison by world size included in num_batches count
                     #dist.all_reduce(self.current_var.detach(), op=dist.ReduceOp.SUM)
                     #self.current_var /= dist.get_world_size()
+            # Accumulate running mean, mean square and num elements over the epoch
+            # use aggregated mean and mean square for multi GPU
+            with torch.no_grad():
+                self.running_mean += self.agrregated_mean
+                self.running_num_batches += self.num_batches
+                #print(int(os.environ["LOCAL_RANK"])," running mean ", self.running_mean, self.running_num_batches)
+                if self.normalize:
+                    #self.current_meansq = current_meansq #  in training use the current lambda
+                    #self.current_var = current_var #  in training use the current lambda
+                    self.running_meansq += current_meansq
+                    #self.running_var += self.current_var
+                    self.running_mean_sample_per_batches += num_elements*self.num_batches #x.shape[0]
             #print("training mean", mean_shape, mean.view(mean_shape).flatten().float().detach().cpu().numpy()[0:3],self.get_running_mean(False).flatten().detach().cpu().numpy()[0:3], self.running_num_batches.cpu().numpy(),)
             #print("training var", self.current_var.shape, self.current_var.flatten()[0:3].detach().cpu().numpy(),self.current_var.flatten().max().detach().cpu().numpy(),(self.running_var.flatten()[0:3]/self.running_num_batches).detach().cpu().numpy())
         else:
             mean = self.get_running_mean(self.training)
             #print("test mean", mean_shape, mean.view(mean_shape).flatten().detach().cpu().numpy()[0:3],self.running_num_batches.cpu().numpy())
             #print("test var", self.running_var.shape, (self.running_var.flatten()[0:3]/self.running_num_batches).detach().cpu().numpy(),(self.running_var.flatten().max()/self.running_num_batches).detach().cpu().numpy())
+        # Compute scaling factor max(sqrt(variance)) either local (training) or global (eval)
         if self.normalize:
+            #print(int(os.environ["LOCAL_RANK"])," local_mean ", self.local_mean, " current_meansq ", self.current_meansq, " num_elements ", num_elements)
             scaling_norm = self.get_scaling_factor(self.training, mean, num_elements).to(x.device)
         else:
             scaling_norm = torch.ones((1,)).to(x.device)
