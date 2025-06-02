@@ -34,7 +34,7 @@ class BatchCentering(nn.Module):
         self.dim = dim
         self.num_features = num_features
         #self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
-        self.register_buffer("num_batches", torch.zeros((1,)))
+        #self.register_buffer("num_batches", torch.zeros((1,)))
         self.register_buffer("running_mean", torch.zeros((num_features,)))
         self.register_buffer("running_num_batches", torch.zeros((1,)))
         if bias:
@@ -77,14 +77,14 @@ class BatchCentering(nn.Module):
             mean = x.mean(dim=self.dim)
             agrregated_mean  = mean.clone().detach()
             # on a single GPU this value is always 1
-            self.num_batches = self.num_batches.zero_() + 1.0
+            num_batches = self.running_num_batches.clone().detach().zero_() + 1.0
             # for multiGPU aggregate mean and num_batches
             if dist.is_initialized():
                 dist.all_reduce(agrregated_mean.detach(), op=dist.ReduceOp.SUM)
-                dist.all_reduce(self.num_batches.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(num_batches.detach(), op=dist.ReduceOp.SUM)
             with torch.no_grad():
                 self.running_mean += agrregated_mean
-                self.running_num_batches += self.num_batches
+                self.running_num_batches += num_batches
 
             '''if dist.is_initialized():
                 dist.all_reduce(self.running_mean.detach(), op=dist.ReduceOp.SUM)
@@ -285,7 +285,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         self.centering = centering
         # register for saving the local mean on batch
         #self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
-        self.register_buffer("num_batches", torch.zeros((1,)))
+        #self.register_buffer("num_batches", torch.zeros((1,)))
         # register for accumulating the running mean over epoch and GPU
         self.register_buffer("running_mean", torch.zeros((num_features,)))
         self.register_buffer("running_num_batches", torch.zeros((1,)))
@@ -383,16 +383,17 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                 '''current_var = torch.where(current_var < self.eps, 
                                         self.var_ones, 
                                         current_var)'''
+            # Get a tensor on the GPU for num_batches (aggregated on GPUs)
             # on a single GPU this value is always 1
-            self.num_batches = self.num_batches.zero_() + 1.0
+            num_batches = self.running_num_batches.clone().detach().zero_() + 1.0
 
             # for multiGPU aggregate mean, mean square and num_batches
             if dist.is_initialized():
-                #print("dist training", mean.shape, self.num_batches)
-                #print("dist training", mean, self.num_batches)
+                #print("dist training", mean.shape, num_batches)
+                #print("dist training", mean, num_batches)
                 dist.all_reduce(agrregated_mean.detach(), op=dist.ReduceOp.SUM)
-                dist.all_reduce(self.num_batches.detach(), op=dist.ReduceOp.SUM)
-                #print("dist reduced", mean, self.num_batches,self.local_mean)
+                dist.all_reduce(num_batches.detach(), op=dist.ReduceOp.SUM)
+                #print("dist reduced", mean, num_batches,self.local_mean)
                 #divison by world size included in num_batches count
                 #self.running_mean /= dist.get_world_size()
                 if self.normalize:
@@ -408,14 +409,14 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             # use aggregated mean and mean square for multi GPU
             with torch.no_grad():
                 self.running_mean += agrregated_mean
-                self.running_num_batches += self.num_batches
+                self.running_num_batches += num_batches
                 #print(int(os.environ["LOCAL_RANK"])," running mean ", self.running_mean, self.running_num_batches)
                 if self.normalize:
                     #self.current_meansq = current_meansq #  in training use the current lambda
                     #self.current_var = current_var #  in training use the current lambda
                     self.running_meansq += current_meansq
                     #self.running_var += self.current_var
-                    self.running_mean_sample_per_batches += num_elements*self.num_batches #x.shape[0]
+                    self.running_mean_sample_per_batches += num_elements*num_batches #x.shape[0]
             #print("training mean", mean_shape, mean.view(mean_shape).flatten().float().detach().cpu().numpy()[0:3],self.get_running_mean(False).flatten().detach().cpu().numpy()[0:3], self.running_num_batches.cpu().numpy(),)
             #print("training var", self.current_var.shape, self.current_var.flatten()[0:3].detach().cpu().numpy(),self.current_var.flatten().max().detach().cpu().numpy(),(self.running_var.flatten()[0:3]/self.running_num_batches).detach().cpu().numpy())
         else:
