@@ -33,7 +33,7 @@ class BatchCentering(nn.Module):
         super(BatchCentering, self).__init__()
         self.dim = dim
         self.num_features = num_features
-        self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
+        #self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
         self.register_buffer("num_batches", torch.zeros((1,)))
         self.register_buffer("running_mean", torch.zeros((num_features,)))
         self.register_buffer("running_num_batches", torch.zeros((1,)))
@@ -75,15 +75,15 @@ class BatchCentering(nn.Module):
                 self.first = False
             # compute local mean (on batch of a single GPU)
             mean = x.mean(dim=self.dim)
-            self.agrregated_mean.copy_(mean)
+            agrregated_mean  = mean.clone().detach()
             # on a single GPU this value is always 1
             self.num_batches = self.num_batches.zero_() + 1.0
             # for multiGPU aggregate mean and num_batches
             if dist.is_initialized():
-                dist.all_reduce(self.agrregated_mean.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(agrregated_mean.detach(), op=dist.ReduceOp.SUM)
                 dist.all_reduce(self.num_batches.detach(), op=dist.ReduceOp.SUM)
             with torch.no_grad():
-                self.running_mean += self.agrregated_mean
+                self.running_mean += agrregated_mean
                 self.running_num_batches += self.num_batches
 
             '''if dist.is_initialized():
@@ -284,7 +284,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         self.num_features = num_features
         self.centering = centering
         # register for saving the local mean on batch
-        self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
+        #self.register_buffer("agrregated_mean", torch.zeros((num_features,)))
         self.register_buffer("num_batches", torch.zeros((1,)))
         # register for accumulating the running mean over epoch and GPU
         self.register_buffer("running_mean", torch.zeros((num_features,)))
@@ -365,7 +365,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                 mean = x.mean(dim=self.dim)
             else:
                 mean = torch.zeros((self.num_features,)).to(x.device)
-            self.agrregated_mean.copy_(mean)
+            agrregated_mean = mean.clone().detach()
             # compute local mean square (on batch of a single GPU)
             if self.normalize:
                 xsq = x*x
@@ -390,7 +390,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             if dist.is_initialized():
                 #print("dist training", mean.shape, self.num_batches)
                 #print("dist training", mean, self.num_batches)
-                dist.all_reduce(self.agrregated_mean.detach(), op=dist.ReduceOp.SUM)
+                dist.all_reduce(agrregated_mean.detach(), op=dist.ReduceOp.SUM)
                 dist.all_reduce(self.num_batches.detach(), op=dist.ReduceOp.SUM)
                 #print("dist reduced", mean, self.num_batches,self.local_mean)
                 #divison by world size included in num_batches count
@@ -407,7 +407,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             # Accumulate running mean, mean square and num elements over the epoch
             # use aggregated mean and mean square for multi GPU
             with torch.no_grad():
-                self.running_mean += self.agrregated_mean
+                self.running_mean += agrregated_mean
                 self.running_num_batches += self.num_batches
                 #print(int(os.environ["LOCAL_RANK"])," running mean ", self.running_mean, self.running_num_batches)
                 if self.normalize:
