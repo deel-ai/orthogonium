@@ -10,6 +10,7 @@ from orthogonium.reparametrizers import (
     CHOLESKY_ORTHO_PARAMS,
     QR_ORTHO_PARAMS,
     CHOLESKY_STABLE_ORTHO_PARAMS,
+    NEWTONSHULTZ_ORTHO_PARAMS,
 )
 
 device = "cpu"  #  torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -102,10 +103,10 @@ def check_orthogonal_layer(
     print(
         f"({input_channels}->{output_channels}, g{groups}, k{kernel_size}), "
         f"sigma_max:"
-        f" {sigma_max:.3f}/{sigma_max_ir:.3f}, "
+        f" {sigma_max:.3f}/{sigma_max_ir:.3f}(ir), "
         f"sigma_min:"
         f" {sigma_min_ir:.3f}, "
-        f"stable_rank: {stable_rank:.3f}/{stable_rank_ir:.3f}"
+        f"stable_rank: {stable_rank:.3f}/{stable_rank_ir:.3f}(ir)"
     )
     # check that the singular values are close to 1
     assert sigma_max_ir < (1 + tol), "sigma_max is not less than 1"
@@ -538,6 +539,7 @@ def test_invalid_dilation_with_stride():
         "qr",
         "cholesky",
         "cholesky_stable",
+        "newtonshultz",
     ],
 )
 def test_parametrizers_standard_configs(
@@ -552,6 +554,7 @@ def test_parametrizers_standard_configs(
         "qr": QR_ORTHO_PARAMS,
         "cholesky": CHOLESKY_ORTHO_PARAMS,
         "cholesky_stable": CHOLESKY_STABLE_ORTHO_PARAMS,
+        "newtonshultz": NEWTONSHULTZ_ORTHO_PARAMS
     }  # trick to have the actual method name displayed properly if test fails
     # Test instantiation
     try:
@@ -585,6 +588,6 @@ def test_parametrizers_standard_configs(
             kernel_size,
             kernel_size,
         ),
-        tol=5e-2 if ortho_params.startswith("cholesky") else 1e-3,
-        sigma_min_requirement=0.75 if ortho_params.startswith("cholesky") else 0.95,
+        tol=5e-2 if ortho_params.startswith("cholesky") or ortho_params.startswith("newtonshultz") else 1e-3,
+        sigma_min_requirement=0.75 if ortho_params.startswith("cholesky") or ortho_params.startswith("newtonshultz") else 0.95,
     )

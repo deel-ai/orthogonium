@@ -9,6 +9,7 @@ from orthogonium.reparametrizers import (
     CHOLESKY_ORTHO_PARAMS,
     CHOLESKY_STABLE_ORTHO_PARAMS,
     QR_ORTHO_PARAMS,
+    NEWTONSHULTZ_ORTHO_PARAMS,
 )
 
 device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -137,6 +138,7 @@ def test_ortho_linear_impulse_response(input_features, output_features):
         ("cholesky", CHOLESKY_ORTHO_PARAMS),
         ("cholesky_stable", CHOLESKY_STABLE_ORTHO_PARAMS),
         ("qr", QR_ORTHO_PARAMS),
+        ("newtonshultz", NEWTONSHULTZ_ORTHO_PARAMS)
     ],
 )
 def test_ortho_linear_with_orthparams(
@@ -158,8 +160,9 @@ def test_ortho_linear_with_orthparams(
 
         # Validate singular values
         sigma_min, sigma_max, stable_rank = layer.singular_values()
+        print(f"sigma_min: {sigma_min}, sigma_max: {sigma_max}, stable_rank: {stable_rank}")
         # Add precision tolerances for different orthparams
-        tol = 1e-2 if orthparams_name.startswith("cholesky") else 1e-3
+        tol = 1e-2 if orthparams_name.startswith("cholesky") or orthparams_name.startswith("newtonshultz") else 1e-3
         assert (
             sigma_max <= 1 + tol
         ), f"Max singular value exceeds tolerance for {orthparams_name}"
