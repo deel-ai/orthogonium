@@ -134,9 +134,10 @@ class BatchedPowerIteration(nn.Module):
         )
 
     def forward(self, X, init_u=None, n_iters=3, return_uv=True):
-        for _ in range(n_iters):
-            self.v = X.transpose(-1, -2) @ self.u
-            self.u = X @ self.v
+        if self.training:
+            for _ in range(n_iters):
+                self.v = X.transpose(-1, -2) @ self.u
+                self.u = X @ self.v
         # stop gradient on u and v
         u = self.u.detach()
         v = self.v.detach()
