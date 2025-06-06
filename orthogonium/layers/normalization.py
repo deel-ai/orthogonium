@@ -116,7 +116,7 @@ class SharedLipFactory:
         module.register_buffer("current_"+buffer_name, current_buffer)
         self.buffers_name2module[buffer_name].append(module)
 
-    def get_var_value(self,module,training, current_mean = None, current_sample_num = None, update=True):
+    def get_var_value(self,module,training, update=True):
         """Retrieve the current variance either local or global."""
         """ current_mean and current_sample_num are required in training mode (for local variance)"""
         """update is only for unit testing (getting values without averaging)"""
@@ -128,7 +128,8 @@ class SharedLipFactory:
             # mean_sum is sum_on_batch(x_i)/current_sample_num
             # variance = (var_sum - (mean_sum*mean_sum))*current_sample_num/(current_sample_num-1)
             var_sum = getattr(module,"current_"+buffer_name)
-            mean_sum = current_mean #getattr(module,"current_mean")
+            mean_sum = getattr(module,"current_mean")
+            current_sample_num = getattr(module,"local_num_elements")
             assert mean_sum is not None, "current_mean should be provided in training mode"
             assert current_sample_num is not None, "current_sample_num should be provided in training mode" 
             var_factor = current_sample_num/(current_sample_num -1)
@@ -183,14 +184,14 @@ class ScaledLipschitzModule(abc.ABC):
     """Retrieve the scaling_factor of the layer (max(sqrt(variance))."""
     """ current_mean and current_sample_num are required in training mode (for local variance)"""
     """ update is only for unit testing (getting values without averaging)"""
-    def get_scaling_factor(self, training: bool= False, current_mean = None, current_sample_num = None, update=True):
-        var = self.get_variance_factor(training, current_mean, current_sample_num, update=update)
+    def get_scaling_factor(self, training: bool= False, update=True):
+        var = self.get_variance_factor(training, update=update)
         return var.sqrt()
-    def get_variance_factor(self, training: bool, current_mean = None, current_sample_num = None, update=True):
+    def get_variance_factor(self, training: bool, update=True):
         if self.factory is None:
             return torch.ones((1,))
         else:
-            return self.factory.get_var_value(self,training, current_mean, current_sample_num, update=update)
+            return self.factory.get_var_value(self,training, update=update)
 
     @abc.abstractmethod
     def vanilla_export(self, lambda_cumul):
@@ -307,6 +308,8 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
             self.normalize = True
         self.eps = eps
         self.first = True
+        self.local_num_elements = None
+        self.current_mean = None
 
     # Reset the running statistics
     def reset_states(self):
@@ -326,8 +329,12 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
     # update running_num_batches to 1.0 (as a batch tha represents theprevious epochs -to forget while learning)
     def update_running_values(self):
         if self.running_num_batches>1:
-            self.running_mean = self.running_mean/self.running_num_batches        
+            self.running_mean = self.running_mean/self.running_num_batches      
+            #print("update_running_values", self.running_mean.shape, self.running_num_batches, self.running_mean[0:4], self.current_mean[0:4])  
             if self.normalize:
+                #var_cur = (self.current_meansq - (self.current_mean)*(self.current_mean))
+                #var_run = (self.running_meansq/self.running_num_batches - (self.running_mean)*(self.running_mean))
+                #print("update_running_valuessq", self.running_meansq.shape, self.running_meansq[0:4]/self.running_num_batches, self.current_meansq[0:4],var_run[0:4], var_cur[0:4],var_run.max(), var_cur.max(),var_run.max()*self.running_mean_sample_per_batches/(self.running_mean_sample_per_batches-1), var_cur.max()*self.local_num_elements/(self.local_num_elements-1))
                 self.running_meansq = self.running_meansq/self.running_num_batches
                 self.total_num_samples = self.running_mean_sample_per_batches 
                 self.running_mean_sample_per_batches = self.running_mean_sample_per_batches/self.running_num_batches
@@ -353,7 +360,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
         if self.dim is None:  # (0,2,3) for 4D tensor; (0,) for 2D tensor
             self.dim = (0,) + tuple(range(2, len(x.shape)))
         mean_shape = (1, -1) + (1,) * (len(x.shape) - 2)
-        num_elements = x[:,0].numel()
+        self.local_num_elements = x[:,0].numel()
         if self.training:
             #print(int(os.environ["LOCAL_RANK"])," input " ,x.shape)
             # on first batch initalize variables
@@ -362,22 +369,25 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                 self.first = False
             # compute local mean (on batch of a single GPU)
             if self.centering:
-                mean = x.mean(dim=self.dim)
+                self.current_mean = x.mean(dim=self.dim)
             else:
-                mean = torch.zeros((self.num_features,)).to(x.device)
-            agrregated_mean = mean.clone().detach()
+                self.current_mean = torch.zeros((self.num_features,)).to(x.device)
+            agrregated_mean = self.current_mean.clone()
             # compute local mean square (on batch of a single GPU)
             if self.normalize:
                 xsq = x*x
-                current_meansq = xsq.mean(dim=self.dim)
+                self.current_meansq = xsq.mean(dim=self.dim)
+                current_meansq = self.current_meansq.clone().detach()
                 #test_var = x.var(dim=self.dim)
-                self.current_meansq.copy_(current_meansq)
+                '''current_meansq = xsq.mean(dim=self.dim)
+                #test_var = x.var(dim=self.dim)
+                self.current_meansq.copy_(current_meansq.detach())'''
                 '''
                 print(x)
                 print(mean)
                 print(mean*mean)
-                print(test_var,(current_meansq - mean*mean)*num_elements/(num_elements-1))
-                print(test_var - (current_meansq - mean*mean)*num_elements/(num_elements-1))'''
+                print(test_var,(current_meansq - mean*mean)*self.local_num_elements/(self.local_num_elements-1))
+                print(test_var - (current_meansq - mean*mean)*self.local_num_elements/(self.local_num_elements-1))'''
                 #current_var = x.var(dim=self.dim)
                 # constant case don't divide by zero
                 '''current_var = torch.where(current_var < self.eps, 
@@ -389,11 +399,11 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
 
             # for multiGPU aggregate mean, mean square and num_batches
             if dist.is_initialized():
-                #print("dist training", mean.shape, num_batches)
-                #print("dist training", mean, num_batches)
+                #print("dist training", agrregated_mean.shape, num_batches)
+                #print("dist training", agrregated_mean, num_batches)
                 dist.all_reduce(agrregated_mean.detach(), op=dist.ReduceOp.SUM)
                 dist.all_reduce(num_batches.detach(), op=dist.ReduceOp.SUM)
-                #print("dist reduced", mean, num_batches,self.local_mean)
+                #print("dist reduced", agrregated_mean, num_batches,self.current_mean)
                 #divison by world size included in num_batches count
                 #self.running_mean /= dist.get_world_size()
                 if self.normalize:
@@ -416,26 +426,26 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
                     #self.current_var = current_var #  in training use the current lambda
                     self.running_meansq += current_meansq
                     #self.running_var += self.current_var
-                    self.running_mean_sample_per_batches += num_elements*num_batches #x.shape[0]
+                    self.running_mean_sample_per_batches += self.local_num_elements*num_batches #x.shape[0]
             #print("training mean", mean_shape, mean.view(mean_shape).flatten().float().detach().cpu().numpy()[0:3],self.get_running_mean(False).flatten().detach().cpu().numpy()[0:3], self.running_num_batches.cpu().numpy(),)
             #print("training var", self.current_var.shape, self.current_var.flatten()[0:3].detach().cpu().numpy(),self.current_var.flatten().max().detach().cpu().numpy(),(self.running_var.flatten()[0:3]/self.running_num_batches).detach().cpu().numpy())
         else:
-            mean = self.get_running_mean(self.training)
+            self.current_mean = self.get_running_mean(self.training)
             #print("test mean", mean_shape, mean.view(mean_shape).flatten().detach().cpu().numpy()[0:3],self.running_num_batches.cpu().numpy())
             #print("test var", self.running_var.shape, (self.running_var.flatten()[0:3]/self.running_num_batches).detach().cpu().numpy(),(self.running_var.flatten().max()/self.running_num_batches).detach().cpu().numpy())
         # Compute scaling factor max(sqrt(variance)) either local (training) or global (eval)
         if self.normalize:
-            #print(int(os.environ["LOCAL_RANK"])," local_mean ", self.local_mean, " current_meansq ", self.current_meansq, " num_elements ", num_elements)
-            scaling_norm = self.get_scaling_factor(self.training, mean, num_elements).to(x.device)
+            #print(int(os.environ["LOCAL_RANK"])," current_mean ", self.current_mean, " current_meansq ", self.current_meansq, " num_elements ", self.local_num_elements)
+            scaling_norm = self.get_scaling_factor(self.training).to(x.device)
         else:
             scaling_norm = torch.ones((1,)).to(x.device)
             #self.running_var/self.running_num_batches # in eval use running lambda
         #if lambda_max < self.eps:
         #    lambda_max = 1.0
         if self.bias is not None:
-            return (x - mean.view(mean_shape))/scaling_norm + self.bias.view(mean_shape)
+            return (x - self.current_mean.view(mean_shape))/scaling_norm + self.bias.view(mean_shape)
         else:
-            return (x - mean.view(mean_shape))/scaling_norm
+            return (x - self.current_mean.view(mean_shape))/scaling_norm
         
     def vanilla_export(self, lambda_cumul):
         lambda_v = self.get_scaling_factor(False)
