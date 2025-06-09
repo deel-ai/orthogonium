@@ -22,6 +22,28 @@ class LayerCentering2D(nn.Module):
 
 
 class BatchCentering(nn.Module):
+    r"""
+    Applies Batch Centering over a 2D, 3D, 4D input.
+    .. math::
+
+        y_i = x_i - \mathrm{E}[x_i] + \beta_i
+    The mean is calculated per-dimension over the mini-batches and
+    other dimensions excepted the feature/channel dimension.
+    :math:`\beta` is a learnable parameter vectors
+    of size `C` (where `C` is the number of features or channels of the input).
+    This layer uses statistics computed from input data in
+    training mode and  a constant in evaluation mode computed as
+    the running mean on training samples.
+    This layer is compatible with multi-GPU training (torch.nn.distributed).
+    This layer is :math:`1`-Lipschitz and should be used
+    Args:
+        num_features: number of features in the input tensor
+        dim: dimensions over which to compute the mean
+            (default ``input.mean((0, -2, -1))`` for a 4D tensor).
+        bias: if `True`, adds a learnable bias to the output
+            of shape (num_features,). Default: `True`
+    """
+
     def __init__(
         self,
         num_features: int = 1,
@@ -252,6 +274,7 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
     only in a sequential model with a last layer that compensate the product
     of the normalization factors.
 
+    This layer is compatible with multi-GPU training (torch.nn.distributed).
     Args:
         size: number of features in the input tensor
         dim: dimensions over which to compute the mean
@@ -429,6 +452,16 @@ class BatchLipNorm(nn.Module, ScaledLipschitzModule):
 
 
 class LipFactor(nn.Module, ScaledLipschitzModule):
+    r"""
+    A PyTorch layer that multiplies the input by a learnable Lipschitz factor.
+    This layer is used to compensate the product of the normalization factors
+    introduced by BatchLipNorm layers in a sequential model.
+    Args:
+        factory: a SharedLipFactory instance that provides the scaling factor
+            if `None`, the scaling factor is set to 1.0. The SharedLipFactory enable to
+            compensate the product of the normalization factors in a sequential model.
+    """
+
     def __init__(
         self,
         factory: Optional[SharedLipFactory] = None,
@@ -452,6 +485,23 @@ class LipFactor(nn.Module, ScaledLipschitzModule):
 
 
 class BnLipSequential(TorchSequential):
+    r"""
+    A PyTorch Sequential container that applies BatchLipNorm layers
+    and a LipFactor layer at the end to compensate the product of the
+    normalization factors introduced by BatchLipNorm layers.
+    Args:
+        lipFactory: a SharedLipFactory instance that provides the scaling factor
+            if `None`, the scaling factor is set to 1.0. The SharedLipFactory enable to
+            compensate the product of the normalization factors in a sequential model.
+        layers: a list of layers to be added to the sequential container.
+
+        Example of usage:
+        >>> lip_factory = SharedLipFactory()
+        >>> layers = [BatchLipNorm(num_features=64), nn.ReLU(), BatchLipNorm(num_features=64)]
+        >>> model = BnLipSequential(lipFactory=lip_factory, layers=layers)
+
+    """
+
     def __init__(self, lipFactory=None, layers=[]):
         super(BnLipSequential, self).__init__(*layers)
         self.lipFactory = lipFactory
