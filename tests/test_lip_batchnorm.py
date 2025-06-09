@@ -321,12 +321,129 @@ def test_Normalization_bias(norm_type, size, input_shape, bias, norm):
         (4, (3, 4), True),
         (4, (3, 4, 8, 8), False),
         (4, (3, 4, 8, 8), True),
+        (13, (64, 13, 8, 8), False),
+        (13, (64, 13, 8, 8), True),
     ],
 )
 @pytest.mark.parametrize(
     "norm",
     [False, True],
 )
+@pytest.mark.parametrize(
+    "type_seq",
+    [0, 1, 2],
+)
+def test_BatchLipNorm_runningmean(size, input_shape, bias, norm, type_seq):
+    """evaluate batch centering convergence of running mean"""
+    #input_shape = uft.to_framework_channel(input_shape)
+    # start with 0 to set up running mean to zero
+    if type_seq == 0:
+        xnp = np.zeros(input_shape)
+        gt_mean = 0.0
+        gt_var = 1.0
+        epochs = 2
+    elif type_seq >= 1:
+        epochs = 20
+        xnp = np.random.normal(0.0, 1.0, input_shape)
+        if len(input_shape) == 2:
+            mean_x = np.mean(xnp, axis=0)
+            var_x = np.var(xnp, axis=0, ddof = 1)
+            num_elem = input_shape[0]
+        else:
+            mean_x = np.mean(xnp, axis=(0, 2, 3))
+            var_x = np.var(xnp, axis=(0, 2, 3), ddof = 1)
+            num_elem = input_shape[0]* input_shape[2] * input_shape[3]
+        if type_seq == 1:
+            gt_mean = mean_x
+            gt_var = var_x*(num_elem-1)*epochs/(epochs* num_elem-1)
+        else:
+            conc_xnp = np.concatenate([xnp, 3 * xnp], axis=0)
+            if len(input_shape) == 2:
+                new_runningvar = np.var(conc_xnp, axis=0, ddof = 1)
+            else:
+                new_runningvar = np.var(
+                    conc_xnp,
+                    axis=(0, 2, 3), ddof = 1) 
+            gt_mean = (mean_x + 3 * mean_x)/2.0
+            print("gt mean_x ",mean_x,  "new_runningvar ",new_runningvar)
+            gt_var = new_runningvar*(2*num_elem-1)*epochs/(2*epochs* num_elem-1)
+    
+    factory = None
+    if norm:
+        factory = SharedLipFactory()
+    bn = BatchLipNorm(**{"num_features": size, "bias": bias, "factory": factory})
+    x = torch.tensor(xnp, dtype=torch.float32)
+
+    
+    for _ in range(epochs):
+        y = bn(x)  # noqa: F841
+        if type_seq == 2:
+            y = bn(3*x)
+    # noqa: F841
+
+    np.testing.assert_allclose(bn.get_running_mean(), gt_mean, atol=1e-5)
+    #constant value => no scale factor
+    if (type_seq == 0) or norm:        
+        print("get_scaling_factor ",bn.get_scaling_factor(False), " var_x ", gt_var,np.sqrt(np.max(gt_var)))       
+        np.testing.assert_allclose(bn.get_scaling_factor(), np.sqrt(np.max(gt_var)), atol=1e-5)
+
+    '''bn.reset_states()
+
+    xnp = np.random.normal(0.0, 1.0, input_shape)
+    if len(input_shape) == 2:
+        mean_x = np.mean(xnp, axis=0)
+        var_x = np.var(xnp, axis=0, ddof = 1)
+        num_elem = input_shape[0]
+    else:
+        mean_x = np.mean(xnp, axis=(0, 2, 3))
+        var_x = np.var(xnp, axis=(0, 2, 3), ddof = 1)
+        num_elem = input_shape[0]* input_shape[2] * input_shape[3]
+
+    print("gt mean_x ",mean_x, "var_x ",var_x)
+    x = torch.tensor(xnp, dtype=torch.float32)
+    epochs = 20
+    for _ in range(epochs):
+        y = bn(x)  # noqa: F841
+
+    np.testing.assert_allclose(bn.get_running_mean(), mean_x, atol=2e-3)
+    if norm:
+        #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=True), var_x, atol=1e-5)
+        #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=False)/bn.running_num_batches, var_x, atol=2e-3)        
+        #np.testing.assert_allclose(bn.get_scaling_factor(True), np.sqrt(np.max(var_x)), atol=1e-5) 
+        #print("mean_x ",mean_x, "var_x ",var_x, "var_x update",var_x)
+        print("get_scaling_factor ",bn.get_scaling_factor(False), " var_x ", var_x*(num_elem-1)*epochs/(epochs* num_elem-1),np.sqrt(np.max(var_x*(num_elem-1)*epochs/(epochs* num_elem-1))))       
+        np.testing.assert_allclose(bn.get_scaling_factor(False), np.sqrt(np.max(var_x*(num_elem-1)*epochs/(epochs* num_elem-1))), atol=2e-3)
+
+    
+    bn.reset_states()
+    for _ in range(epochs):
+        y = bn(x)  # noqa: F841
+        y = bn(3*x)  # noqa: F841
+    
+    
+    new_runningmean = (mean_x + 3 * mean_x)/2.0 #mean_x * (1 - bn_mom) + 2 * mean_x * bn_mom
+    #new_runningvar = (var_x + 4 * var_x)/2.0 #mean_x * (1 - bn_mom) + 2 * mean_x * bn_mom
+    conc_xnp = np.concatenate([xnp, 3 * xnp], axis=0)
+    if len(input_shape) == 2:
+        new_runningvar = np.var(conc_xnp, axis=0, ddof = 1)
+        num_elem = input_shape[0]
+    else:
+        new_runningvar = np.var(
+            conc_xnp,
+            axis=(0, 2, 3), ddof = 1) #(var_x + 4 * var_x + 0.5*(mean_x-2 * mean_x)**2)/2.0 #mean_x * (1 - bn_mom) + 2 * mean_x * bn_mom
+        num_elem = input_shape[0]* input_shape[2] * input_shape[3]
+
+    np.testing.assert_allclose(bn.get_running_mean(), new_runningmean, atol=2e-3)
+    if norm:
+        #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=True), var_x, atol=1e-5)
+        #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=False)/bn.running_num_batches, var_x, atol=2e-3)        
+        #np.testing.assert_allclose(bn.get_scaling_factor(True), np.sqrt(np.max(var_x)), atol=1e-5) 
+        #print("mean_x ",mean_x, "var_x ",var_x, "var_x update",var_x)
+        print("get_scaling_factor ",bn.get_scaling_factor(False), " var_x ", new_runningvar*(num_elem-1)*epochs/(epochs* num_elem-1),np.sqrt(np.max(new_runningvar*(num_elem-1)*epochs/(epochs* num_elem-1))))       
+        np.testing.assert_allclose(bn.get_scaling_factor(False), np.sqrt(np.max(new_runningvar*(num_elem-1)*epochs/(epochs* num_elem-1))), atol=2e-3)
+'''
+
+'''
 def test_BatchLipNorm_runningmean(size, input_shape, bias, norm):
     """evaluate batch centering convergence of running mean"""
     #input_shape = uft.to_framework_channel(input_shape)
@@ -343,17 +460,22 @@ def test_BatchLipNorm_runningmean(size, input_shape, bias, norm):
     #constant value => no scale factor
     np.testing.assert_allclose(bn.get_scaling_factor(), 1.0, atol=1e-5)
 
-    x = np.random.normal(0.0, 1.0, input_shape)
+    bn.reset_states()
+
+    xnp = np.random.normal(0.0, 1.0, input_shape)
     if len(input_shape) == 2:
-        mean_x = np.mean(x, axis=0)
-        var_x = np.var(x, axis=0, ddof = 1)
+        mean_x = np.mean(xnp, axis=0)
+        var_x = np.var(xnp, axis=0, ddof = 1)
         num_elem = input_shape[0]
     else:
-        mean_x = np.mean(x, axis=(0, 2, 3))
-        var_x = np.var(x, axis=(0, 2, 3), ddof = 1)
+        mean_x = np.mean(xnp, axis=(0, 2, 3))
+        var_x = np.var(xnp, axis=(0, 2, 3), ddof = 1)
         num_elem = input_shape[0]* input_shape[2] * input_shape[3]
-    x = torch.tensor(x, dtype=torch.float32)
-    for _ in range(2000):
+
+    print("gt mean_x ",mean_x, "var_x ",var_x)
+    x = torch.tensor(xnp, dtype=torch.float32)
+    epochs = 20
+    for _ in range(epochs):
         y = bn(x)  # noqa: F841
 
     np.testing.assert_allclose(bn.get_running_mean(), mean_x, atol=2e-3)
@@ -362,5 +484,34 @@ def test_BatchLipNorm_runningmean(size, input_shape, bias, norm):
         #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=False)/bn.running_num_batches, var_x, atol=2e-3)        
         #np.testing.assert_allclose(bn.get_scaling_factor(True), np.sqrt(np.max(var_x)), atol=1e-5) 
         #print("mean_x ",mean_x, "var_x ",var_x, "var_x update",var_x)
-        #print("get_scaling_factor ",bn.get_scaling_factor(False), " var_x ", np.sqrt(np.max(var_x*(num_elem-1)*2000/(2000* num_elem-1))))       
-        np.testing.assert_allclose(bn.get_scaling_factor(False), np.sqrt(np.max(var_x*(num_elem-1)*2000/(2000* num_elem-1))), atol=2e-3)
+        print("get_scaling_factor ",bn.get_scaling_factor(False), " var_x ", var_x*(num_elem-1)*epochs/(epochs* num_elem-1),np.sqrt(np.max(var_x*(num_elem-1)*epochs/(epochs* num_elem-1))))       
+        np.testing.assert_allclose(bn.get_scaling_factor(False), np.sqrt(np.max(var_x*(num_elem-1)*epochs/(epochs* num_elem-1))), atol=2e-3)
+
+    
+    bn.reset_states()
+    for _ in range(epochs):
+        y = bn(x)  # noqa: F841
+        y = bn(3*x)  # noqa: F841
+    
+    
+    new_runningmean = (mean_x + 3 * mean_x)/2.0 #mean_x * (1 - bn_mom) + 2 * mean_x * bn_mom
+    #new_runningvar = (var_x + 4 * var_x)/2.0 #mean_x * (1 - bn_mom) + 2 * mean_x * bn_mom
+    conc_xnp = np.concatenate([xnp, 3 * xnp], axis=0)
+    if len(input_shape) == 2:
+        new_runningvar = np.var(conc_xnp, axis=0, ddof = 1)
+        num_elem = input_shape[0]
+    else:
+        new_runningvar = np.var(
+            conc_xnp,
+            axis=(0, 2, 3), ddof = 1) #(var_x + 4 * var_x + 0.5*(mean_x-2 * mean_x)**2)/2.0 #mean_x * (1 - bn_mom) + 2 * mean_x * bn_mom
+        num_elem = input_shape[0]* input_shape[2] * input_shape[3]
+
+    np.testing.assert_allclose(bn.get_running_mean(), new_runningmean, atol=2e-3)
+    if norm:
+        #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=True), var_x, atol=1e-5)
+        #np.testing.assert_allclose(bn.factory.get_var_value(bn,training=False)/bn.running_num_batches, var_x, atol=2e-3)        
+        #np.testing.assert_allclose(bn.get_scaling_factor(True), np.sqrt(np.max(var_x)), atol=1e-5) 
+        #print("mean_x ",mean_x, "var_x ",var_x, "var_x update",var_x)
+        print("get_scaling_factor ",bn.get_scaling_factor(False), " var_x ", new_runningvar*(num_elem-1)*epochs/(epochs* num_elem-1),np.sqrt(np.max(new_runningvar*(num_elem-1)*epochs/(epochs* num_elem-1))))       
+        np.testing.assert_allclose(bn.get_scaling_factor(False), np.sqrt(np.max(new_runningvar*(num_elem-1)*epochs/(epochs* num_elem-1))), atol=2e-3)
+'''

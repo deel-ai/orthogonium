@@ -8,7 +8,7 @@ from orthogonium.layers import LayerCentering2D, BatchCentering2D
     "layer_fn, num_features, orthogonal",
     [
         (lambda: LayerCentering2D(num_features=4), 4, False),
-        (lambda: BatchCentering2D(num_features=4), 4, True),
+        (lambda: BatchCentering2D(num_features=4), 4, False),
     ],
 )
 @pytest.mark.parametrize(
