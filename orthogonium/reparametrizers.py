@@ -120,6 +120,7 @@ class BatchedPowerIteration(nn.Module):
         self.weight_shape = weight_shape
         self.power_it_niter = power_it_niter
         self.eps = eps
+        self.dim = -2
         # init u
         # u will be weight_shape[:-2] + (weight_shape[:-2], 1)
         # v will be weight_shape[:-2] + (weight_shape[:-1], 1,)
@@ -127,27 +128,29 @@ class BatchedPowerIteration(nn.Module):
             torch.Tensor(torch.randn(*weight_shape[:-2], weight_shape[-2], 1)),
             requires_grad=False,
         )
-        self.v = nn.Parameter(
-            torch.Tensor(torch.randn(*weight_shape[:-2], weight_shape[-1], 1)),
-            requires_grad=False,
-        )
-        parametrize.register_parametrization(
-            self, "u", L2Normalize(dtype=self.u.dtype, dim=(-2))
-        )
-        parametrize.register_parametrization(
-            self, "v", L2Normalize(dtype=self.v.dtype, dim=(-2))
-        )
+        # keep the sigma max for eval mode
+        self.register_buffer("s", torch.ones([1]), persistent=True)
 
+    def normalize(self, x):
+        return x / (torch.norm(x, dim=self.dim, keepdim=True, dtype=x.dtype) + 1e-8)
+    
     def forward(self, X, init_u=None, n_iters=3, return_uv=True):
+        u = self.u
         if self.training:
             for _ in range(n_iters):
-                self.v = X.transpose(-1, -2) @ self.u
-                self.u = X @ self.v
-        # stop gradient on u and v
-        u = self.u.detach()
-        v = self.v.detach()
-        # but keep gradient on s
-        s = u.transpose(-1, -2) @ X @ v
+                u = self.normalize(u)
+                v = X.transpose(-1, -2) @ u
+                u = X @ v
+            # stop gradient on u and v
+            u = self.normalize(u).detach()
+            self.u.data = u
+            v = self.normalize(v).detach()
+
+            # but keep gradient on s
+            s = u.transpose(-1, -2) @ X @ v
+            self.s = s.detach()
+        else:
+            s = self.s
         return X / (s + self.eps)
 
     def right_inverse(self, normalized_kernel):
