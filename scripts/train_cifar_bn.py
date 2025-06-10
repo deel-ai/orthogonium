@@ -377,7 +377,7 @@ def train(use_wandb, save_model, conf):
     lr_logger = LearningRateMonitor(logging_interval="epoch")
     trainer = Trainer(
         accelerator="gpu",
-        devices=2,  # GPUs per node
+        devices=1,  # GPUs per node
         num_nodes=1,  # Number of nodes
         strategy="ddp",  # Distributed strategy
         precision=32,  # "bf16-mixed",
