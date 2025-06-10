@@ -5,12 +5,12 @@ from .custom_activations import MaxMin
 from .linear.ortho_linear import OrthoLinear
 from .linear.ortho_linear import UnitNormLinear
 from .normalization import BatchCentering2D
-from .normalization import BatchCentering
+#from .normalization import BatchCentering
 from .normalization import LayerCentering2D
-from .normalization import ScaledLipschitzModule
+'''from .normalization import ScaledLipschitzModule
 from .normalization import BatchLipNorm
 from .normalization import SharedLipFactory
-from .normalization import BnLipSequential
+from .normalization import BnLipSequential'''
 from .channel_shuffle import ChannelShuffle
 from orthogonium.layers.conv.AOC.ortho_conv import AdaptiveOrthoConv2d
 from orthogonium.layers.conv.AOC.ortho_conv import AdaptiveOrthoConvTranspose2d

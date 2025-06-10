@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
-import abc
+'''import abc
 import copy
 import torch.distributed as dist
 from torch.nn import Sequential as TorchSequential
 from typing import Optional 
-from collections import OrderedDict
+from collections import OrderedDict'''
 
 
 class LayerCentering2D(nn.Module):
@@ -20,8 +20,26 @@ class LayerCentering2D(nn.Module):
         return x - mean + self.bias
 
 
+class BatchCentering2D(nn.Module):
+    def __init__(self, num_features, momentum=0.10):
+        super(BatchCentering2D, self).__init__()
+        self.momentum = momentum
+        self.register_buffer("running_mean", torch.zeros(1))
+        self.bias = nn.Parameter(
+            torch.zeros((1, num_features, 1, 1)), requires_grad=True
+        )
 
+    def forward(self, x):
+        if self.training:
+            mean = x.mean(dim=(0, -2, -1), keepdim=True)
+            self.running_mean = (
+                1 - self.momentum
+            ) * self.running_mean + self.momentum * mean.detach()
+            return x - self.running_mean.detach() + self.bias
+        else:
+            return x - self.running_mean + self.bias
 
+'''
 class BatchCentering(nn.Module):
     def __init__(
         self,
@@ -366,29 +384,10 @@ class BnLipSequential(TorchSequential):
         x = super(BnLipSequential, self).forward(x)
         x = self.lfc(x)
         return x
-    '''def forward_and_keep(self, x):
-        getl_all_layers = []
-        getl_all_layers.append(x.detach().cpu().numpy())
-        for i in range(self.num_layers):
-            x = self.layers[i](x)
-            getl_all_layers.append(x.detach().cpu().numpy())
-            x = self.normalizations[i](x)
-            getl_all_layers.append(x.detach().cpu().numpy())
-            if i < self.num_layers-1:
-                x = self.activation(x)  # No activation on the last layer   
-            getl_all_layers.append(x.detach().cpu().numpy())
-        x = self.fc(x)
-        getl_all_layers.append(x.detach().cpu().numpy())
-        x = self.lfc(x)
-        getl_all_layers.append(x.detach().cpu().numpy())
-        return x, getl_all_layers'''
+    
     
     def vanilla_export_layer(self, layer, lambda_cumul):
-        '''if isinstance(layer, LipschitzModule):
-            layer = layer.vanilla_export()
-            if hasattr(layer, "bias") and layer.bias is not None:
-                layer.bias.data = layer.bias.data*lambda_cumul
-            return layer, lambda_cumul'''
+        
         if isinstance(layer, ScaledLipschitzModule):
             return layer.vanilla_export(lambda_cumul)
         return copy.deepcopy(layer), lambda_cumul
@@ -404,3 +403,5 @@ class BnLipSequential(TorchSequential):
             layers.append((f"lfc",layer))
         assert torch.abs(lambda_cumul - 1.0)< 1e-5, "Lipschitz constant is not one"
         return TorchSequential(OrderedDict(layers)).eval()
+
+'''
