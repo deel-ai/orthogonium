@@ -335,7 +335,7 @@ class ClassificationLightningModule(LightningModule):
         self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
             T_max=self.max_epochs
-            * 98,  # 196,  # number of steps for one full cosine cycle
+            * 196,  # bi GPU 98,  # ,  # number of steps for one full cosine cycle
             # 196 batches or 196/world_size
             eta_min=init_lr / 1000.0,  # min learning rate at the end of schedule
         )
@@ -365,6 +365,7 @@ def train(use_wandb, save_model, conf):
     logger = None
     if use_wandb:
         wandb_logger = WandbLogger(project="lipschitz_cifar10", log_model=False)
+        wandb_logger.experiment.config.update(conf)
         logger = [wandb_logger]
     # checkpoint_callback = pl_callbacks.ModelCheckpoint(
     #     monitor="loss",

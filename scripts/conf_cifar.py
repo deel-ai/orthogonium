@@ -13,7 +13,7 @@ from orthogonium.model_factory.models_factory import (
     StagedCNN,
 )
 
-from deel.torchlip import SoftHKRMulticlassLoss
+from deel.torchlip import SoftHKRMulticlassLoss, LseHKRMulticlassLoss
 
 stagecnn_lipbn = ClassParam(
     StagedCNN,
@@ -31,10 +31,12 @@ stagecnn_lipbn = ClassParam(
     act=ClassParam(MaxMin),
     lin=ClassParam(OrthoLinear, bias=True),
     norm=ClassParam(BatchLipNorm),
+    last_layer_type="global",
 )
 
 stagecnn_lipbn_disjoint = copy.deepcopy(stagecnn_lipbn)
-stagecnn_lipbn_disjoint.kwargs["lin"] = ClassParam(UnitNormLinear, bias=True)
+stagecnn_lipbn_disjoint.kwargs["last_layer_type"] = "classwise"
+# stagecnn_lipbn_disjoint.kwargs["lin"] = ClassParam(UnitNormLinear, bias=True)
 
 
 stagecnn_center = copy.deepcopy(stagecnn_lipbn)
@@ -42,7 +44,8 @@ stagecnn_center.kwargs["norm"] = ClassParam(BatchCentering)
 
 
 stagecnn_center_disjoint = copy.deepcopy(stagecnn_center)
-stagecnn_center_disjoint.kwargs["lin"] = ClassParam(UnitNormLinear, bias=True)
+stagecnn_lipbn_disjoint.kwargs["last_layer_type"] = "classwise"
+# stagecnn_center_disjoint.kwargs["lin"] = ClassParam(UnitNormLinear, bias=True)
 
 loss_xent_robust = ClassParam(
     LossXent, n_classes=10, offset=1.5 * math.sqrt(2), temperature=0.25
@@ -53,6 +56,13 @@ loss_hkr = ClassParam(
     SoftHKRMulticlassLoss,
     alpha=0.9995,
     min_margin=1.2,  # 1.0, #36 / 255.0,
+    temperature=0.25,
+)
+
+loss_lsehkr = ClassParam(
+    LseHKRMulticlassLoss,
+    alpha=0.9995,
+    min_margin=0.3,  # 1.0, #36 / 255.0,
     temperature=0.25,
 )
 
@@ -69,6 +79,12 @@ conf_stagedcnn_lipbn_robust_hkr = copy.deepcopy(conf_stagedcnn_lipbn_robust)
 conf_stagedcnn_lipbn_robust_hkr["conf_name"] = "stagedcnn_lipbn_robust_hkr"
 conf_stagedcnn_lipbn_robust_hkr["loss"] = loss_hkr
 conf_stagedcnn_lipbn_robust_hkr["require_one_hot_labels"] = True
+
+# LogSumExp HKR loss
+conf_stagedcnn_lipbn_robust_lsehkr = copy.deepcopy(conf_stagedcnn_lipbn_robust)
+conf_stagedcnn_lipbn_robust_lsehkr["conf_name"] = "stagedcnn_lipbn_robust_lsehkr"
+conf_stagedcnn_lipbn_robust_lsehkr["loss"] = loss_lsehkr
+conf_stagedcnn_lipbn_robust_lsehkr["require_one_hot_labels"] = True
 
 
 conf_stagedcnn_lipbn_disjoint_robust = {
@@ -88,6 +104,16 @@ conf_stagedcnn_lipbn_disjoint_robust_hkr["conf_name"] = (
 conf_stagedcnn_lipbn_disjoint_robust_hkr["loss"] = loss_hkr
 conf_stagedcnn_lipbn_disjoint_robust_hkr["require_one_hot_labels"] = True
 
+
+conf_stagedcnn_lipbn_disjoint_robust_lsehkr = copy.deepcopy(
+    conf_stagedcnn_lipbn_disjoint_robust
+)
+conf_stagedcnn_lipbn_disjoint_robust_lsehkr["conf_name"] = (
+    "stagedcnn_lipbn_disjoint_robust_lsehkr"
+)
+conf_stagedcnn_lipbn_disjoint_robust_lsehkr["loss"] = loss_lsehkr
+conf_stagedcnn_lipbn_disjoint_robust_lsehkr["require_one_hot_labels"] = True
+
 conf_stagedcnn_center_robust = {
     "conf_name": "stagedcnn_center_robust",
     "model": stagecnn_center,
@@ -100,6 +126,11 @@ conf_stagedcnn_center_robust_hkr = copy.deepcopy(conf_stagedcnn_center_robust)
 conf_stagedcnn_center_robust_hkr["conf_name"] = "stagedcnn_center_robust_hkr"
 conf_stagedcnn_center_robust_hkr["loss"] = loss_hkr
 conf_stagedcnn_center_robust_hkr["require_one_hot_labels"] = True
+
+conf_stagedcnn_center_robust_lsehkr = copy.deepcopy(conf_stagedcnn_center_robust)
+conf_stagedcnn_center_robust_lsehkr["conf_name"] = "stagedcnn_center_robust_lsehkr"
+conf_stagedcnn_center_robust_lsehkr["loss"] = loss_lsehkr
+conf_stagedcnn_center_robust_lsehkr["require_one_hot_labels"] = True
 
 conf_stagedcnn_center_disjoint_robust = {
     "conf_name": "stagedcnn_center_disjoint_robust",
@@ -117,3 +148,12 @@ conf_stagedcnn_center_disjoint_robust_hkr["conf_name"] = (
 )
 conf_stagedcnn_center_disjoint_robust_hkr["loss"] = loss_hkr
 conf_stagedcnn_center_disjoint_robust_hkr["require_one_hot_labels"] = True
+
+conf_stagedcnn_center_disjoint_robust_lsehkr = copy.deepcopy(
+    conf_stagedcnn_center_disjoint_robust
+)
+conf_stagedcnn_center_disjoint_robust_lsehkr["conf_name"] = (
+    "stagedcnn_center_disjoint_robust_lsehkr"
+)
+conf_stagedcnn_center_disjoint_robust_lsehkr["loss"] = loss_lsehkr
+conf_stagedcnn_center_disjoint_robust_lsehkr["require_one_hot_labels"] = True
