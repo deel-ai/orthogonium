@@ -505,17 +505,13 @@ class BnLipSequential(TorchSequential):
     def __init__(self, lipFactory=None, layers=[]):
         super(BnLipSequential, self).__init__(*layers)
         self.lipFactory = lipFactory
-        self.lfc = LipFactor(self.lipFactory)
+        lfc = LipFactor(self.lipFactory)
+        self.append(lfc)
 
     def update_running_values(self):
         for ll in self:
             if isinstance(ll, BatchLipNorm):
                 ll.update_running_values()
-
-    def forward(self, x):
-        x = super(BnLipSequential, self).forward(x)
-        x = self.lfc(x)
-        return x
 
     def vanilla_export_layer(self, layer, lambda_cumul):
         if isinstance(layer, ScaledLipschitzModule):
