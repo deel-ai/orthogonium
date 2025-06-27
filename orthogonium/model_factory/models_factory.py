@@ -13,6 +13,8 @@ from orthogonium.layers.conv.SLL.sll_layer import SLLxAOCLipschitzResBlock
 from orthogonium.layers.conv.SLL.sll_layer import SDPBasedLipschitzResBlock
 from orthogonium.reparametrizers import DEFAULT_ORTHO_PARAMS
 
+from orthogonium import layers as ol
+
 
 def SLLxBCOPResNet50(
     img_shape=(3, 224, 224),
@@ -830,9 +832,16 @@ def StagedCNN(
     pool=None,
     lin=ClassParam(OrthoLinear),
     norm=ClassParam(LayerCentering2D),
+    last_layer_type="global",  # 'global' or 'classwise'
 ):
     layers = []
     in_channels = img_shape[0]
+
+    useSharedLip = False
+    if isinstance(norm, ClassParam) and issubclass(norm.fct, ol.ScaledLipschitzModule):
+        scaleLipFactory = ol.SharedLipFactory()
+        norm.kwargs["factory"] = scaleLipFactory
+        useSharedLip = True
 
     # enrich the list of dim_repeats with the next number of channels in the list
     for i in range(len(dim_repeats) - 1):
@@ -844,8 +853,8 @@ def StagedCNN(
         # Add repeated conv layers
         for _ in range(repeats):
             layers.append(conv(in_channels=in_channels, out_channels=dim))
+            layers.append(norm(num_features=dim) if norm is not None else nn.Identity())
             layers.append(act())
-            layers.append(norm() if norm is not None else nn.Identity())
             in_channels = dim
 
         if next_dim is not None:
@@ -857,8 +866,10 @@ def StagedCNN(
                     stride=2,
                 )
             )
+            layers.append(
+                norm(num_features=next_dim) if norm is not None else nn.Identity()
+            )
             layers.append(act())
-            layers.append(norm() if norm is not None else nn.Identity())
             in_channels = next_dim
 
     feat_shape = img_shape[-1] // (2 ** (len(dim_repeats) - 1))
@@ -873,14 +884,22 @@ def StagedCNN(
         dim, repeats = dim_nb_dense
         for _ in range(repeats):
             layers.append(lin(nb_features, dim))
+            layers.append(norm(num_features=dim) if norm is not None else nn.Identity())
             layers.append(act())
             nb_features = dim
     else:
         dim = nb_features
     # Final linear layer for classification
-    layers.append(lin(dim, n_classes))
+    if last_layer_type == "global":
+        layers.append(lin(dim, n_classes))
+    else:
+        layers.append(ol.UnitNormLinear(dim, n_classes, bias=True))
 
-    return nn.Sequential(*layers)
+    if useSharedLip:
+        print(layers)
+        return ol.BnLipSequential(lipFactory=scaleLipFactory, layers=layers)
+    else:
+        return nn.Sequential(*layers)
 
 
 def LargeStagedCNN(

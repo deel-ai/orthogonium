@@ -59,17 +59,19 @@ class BatchedNewtonShultz(nn.Module):
     # @torch.compile
     @staticmethod
     def zeropower_via_newtonschulz5(G: torch.Tensor) -> torch.Tensor:
-        assert G.ndim >= 2  # batched Muon implementation by @scottjmaddox, and put into practice in the record by @YouJiacheng
+        assert (
+            G.ndim >= 2
+        )  # batched Muon implementation by @scottjmaddox, and put into practice in the record by @YouJiacheng
         steps = 5  # number of iterations to perform
         # a, b, c =  (3.4445, -4.7750,  2.0315)#(2.0, 1.5, 0.5)
         coefs = [
             # (3.5,       -6126/1024,  3061/1024), # seems like the 2 first iteration can be removed without loss of precision
             # (3.5,       -7054/1024,  4050/1024),
-            (3.5,       -8124/1024,  5372/1024),
-            (3.5,       -9360/1024,  7130/1024),
-            (3.5,       -7340/1024,  5451/1024),
-            (3.5/1.75,  -2713/1024/1.75,  917/1024/1.75),
-        ] # variable coefs for the quintic iteration, from https://x.com/YouJiacheng/status/1893573513295897055/photo/1
+            (3.5, -8124 / 1024, 5372 / 1024),
+            (3.5, -9360 / 1024, 7130 / 1024),
+            (3.5, -7340 / 1024, 5451 / 1024),
+            (3.5 / 1.75, -2713 / 1024 / 1.75, 917 / 1024 / 1.75),
+        ]  # variable coefs for the quintic iteration, from https://x.com/YouJiacheng/status/1893573513295897055/photo/1
         # X = G.bfloat16()
         X = G
         if G.size(-2) > G.size(-1):
@@ -80,7 +82,9 @@ class BatchedNewtonShultz(nn.Module):
         # Perform the NS iterations
         for a, b, c in coefs:
             A = X @ X.mT
-            B = b * A + c * A @ A  # quintic computation strategy adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
+            B = (
+                b * A + c * A @ A
+            )  # quintic computation strategy adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
             X = a * X + B @ X
 
         if G.size(-2) > G.size(-1):
@@ -92,6 +96,7 @@ class BatchedNewtonShultz(nn.Module):
 
     def right_inverse(self, w):
         return w
+
 
 class BatchedPowerIteration(nn.Module):
     def __init__(self, weight_shape, power_it_niter=3, eps=1e-12):
@@ -134,9 +139,10 @@ class BatchedPowerIteration(nn.Module):
         )
 
     def forward(self, X, init_u=None, n_iters=3, return_uv=True):
-        for _ in range(n_iters):
-            self.v = X.transpose(-1, -2) @ self.u
-            self.u = X @ self.v
+        if self.training:
+            for _ in range(n_iters):
+                self.v = X.transpose(-1, -2) @ self.u
+                self.u = X @ self.v
         # stop gradient on u and v
         u = self.u.detach()
         v = self.v.detach()
