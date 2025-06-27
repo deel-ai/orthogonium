@@ -62,8 +62,8 @@ loss_hkr = ClassParam(
 loss_lsehkr = ClassParam(
     LseHKRMulticlassLoss,
     alpha=0.9995,
-    min_margin=0.3,  # 1.0, #36 / 255.0,
-    temperature=0.25,
+    min_margin=1.0,  # 1.0, #36 / 255.0,
+    temperature=0.5,
 )
 
 
