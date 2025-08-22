@@ -124,9 +124,9 @@ class BatchedPowerIteration(nn.Module):
         # init u
         # u will be weight_shape[:-2] + (weight_shape[:-2], 1)
         # v will be weight_shape[:-2] + (weight_shape[:-1], 1,)
-        self.u = nn.Parameter(
+        self.register_buffer("u",
             torch.Tensor(torch.randn(*weight_shape[:-2], weight_shape[-2], 1)),
-            requires_grad=False,
+            persistent=True
         )
         # keep the sigma max for eval mode
         self.register_buffer("s", torch.ones([1]), persistent=True)
@@ -143,7 +143,7 @@ class BatchedPowerIteration(nn.Module):
                 u = X @ v
             # stop gradient on u and v
             u = self.normalize(u).detach()
-            self.u.data = u
+            self.u = u
             v = self.normalize(v).detach()
 
             # but keep gradient on s
