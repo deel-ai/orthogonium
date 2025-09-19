@@ -124,16 +124,17 @@ class BatchedPowerIteration(nn.Module):
         # init u
         # u will be weight_shape[:-2] + (weight_shape[:-2], 1)
         # v will be weight_shape[:-2] + (weight_shape[:-1], 1,)
-        self.register_buffer("u",
+        self.register_buffer(
+            "u",
             torch.Tensor(torch.randn(*weight_shape[:-2], weight_shape[-2], 1)),
-            persistent=True
+            persistent=True,
         )
         # keep the sigma max for eval mode
         self.register_buffer("s", torch.ones([1]), persistent=True)
 
     def normalize(self, x):
         return x / (torch.norm(x, dim=self.dim, keepdim=True, dtype=x.dtype) + 1e-8)
-    
+
     def forward(self, X, init_u=None, n_iters=3, return_uv=True):
         u = self.u
         if self.training:

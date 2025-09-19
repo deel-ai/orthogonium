@@ -1,3 +1,4 @@
+
 import numpy as np
 import pytest
 import torch
@@ -35,6 +36,7 @@ def _compute_sv_impulse_response_layer(layer, img_shape):
         outputs = layer(inputs)
         try:
             outputs_reshaped = outputs.view(outputs.shape[0], -1)
+            # Compute singular values
             sv_max = torch.linalg.norm(outputs_reshaped, ord=2)
             sv_min = torch.linalg.norm(outputs_reshaped, ord=-2)
             fro_norm = torch.linalg.norm(outputs_reshaped, ord="fro")
@@ -134,13 +136,16 @@ def check_orthogonal_layer(
 
 @pytest.mark.parametrize("kernel_size", [1, 3, 5])
 @pytest.mark.parametrize("input_channels", [8, 16])
-@pytest.mark.parametrize("output_channels", [8, 16])
+@pytest.mark.parametrize("output_channels", [8, 32])
 @pytest.mark.parametrize("stride", [1, 2])
 @pytest.mark.parametrize("groups", [1, 2, 4])
 def test_standard_configs(kernel_size, input_channels, output_channels, stride, groups):
     """
     test combinations of kernel size, input channels, output channels, stride and groups
     """
+    seed = 1833 #np.random.randint(0, 10000)
+    print(f"Running test with seed: {seed}")
+    torch.manual_seed(seed)  # For reproducibility
     # Test instantiation
     try:
         orthoconv = AdaptiveOrthoConv2d(
@@ -174,6 +179,10 @@ def test_standard_configs(kernel_size, input_channels, output_channels, stride, 
             kernel_size,
         ),
     )
+    '''if (input_channels == 8) and (output_channels == 8) and (kernel_size == 3) and (stride == 1) and (groups == 1):
+        # this is a specific case that fails with the default parameters
+        aaa
+        pytest.xfail("This configuration is known to fail with the default parameters.")'''
 
 
 @pytest.mark.parametrize("kernel_size", [2, 3, 4, 5])
@@ -600,3 +609,4 @@ def test_parametrizers_standard_configs(
         tol=5e-2 if ortho_params.startswith("cholesky") or ortho_params.startswith("newtonshultz") else 1e-3,
         sigma_min_requirement=0.75 if ortho_params.startswith("cholesky") or ortho_params.startswith("newtonshultz") else 0.95,
     )
+

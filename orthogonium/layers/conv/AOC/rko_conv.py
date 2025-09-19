@@ -136,21 +136,33 @@ class RKOConv2d(nn.Conv2d):
             math.ceil(self.kernel_size[0] / self.stride[0])
             * math.ceil(self.kernel_size[1] / self.stride[1])
         )
-        parametrize.register_parametrization(
+        self.cached_weights = False
+        self._cached_weights = None
+        del self.weight
+        attach_rko_weight(
             self,
-            "weight",
-            RKOParametrizer(
-                kernel_shape=(
-                    out_channels,
-                    in_channels // self.groups,
-                    self.kernel_size[0],
-                    self.kernel_size[1],
-                ),
-                groups=self.groups,
-                scale=self.scale,
-                ortho_params=ortho_params,
+            "weight_",
+            (
+                out_channels,
+                in_channels // self.groups,
+                self.kernel_size[0],
+                self.kernel_size[1],
             ),
+            groups=self.groups,
+            scale=self.scale,
+            ortho_params=ortho_params,
         )
+
+    @property
+    def weight(self):
+        if self.training:
+            self.cached_weights = False
+            return self.weight_
+        else:
+            if not self.cached_weights:
+                self._cached_weight = self.weight_.detach().contiguous()
+                self.cached_weights = True
+            return self._cached_weight
 
 
 class RkoConvTranspose2d(PaddingConvTranspose2d):
@@ -202,12 +214,25 @@ class RkoConvTranspose2d(PaddingConvTranspose2d):
             )
         else:
             self.scale = 1
+        self.cached_weights = False
+        self._cached_weights = None
         del self.weight
         attach_rko_weight(
             self,
-            "weight",
+            "weight_",
             (in_channels, out_channels // groups, self.stride[0], self.stride[1]),
             groups,
             scale=self.scale,
             ortho_params=ortho_params,
         )
+
+    @property
+    def weight(self):
+        if self.training:
+            self.cached_weights = False
+            return self.weight_
+        else:
+            if not self.cached_weights:
+                self._cached_weight = self.weight_.detach().contiguous()
+                self.cached_weights = True
+            return self._cached_weight

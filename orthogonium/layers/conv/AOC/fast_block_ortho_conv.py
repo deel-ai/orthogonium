@@ -391,10 +391,12 @@ class FastBlockConv2d(nn.Conv2d):
             raise ValueError(
                 "dilation must be 1 when stride is not 1. The set of orthonal convolutions is empty in this setting."
             )
+        self.cached_weights = False
+        self._cached_weights = None
         del self.weight
         attach_bcop_weight(
             self,
-            "weight",
+            "weight_",
             (
                 out_channels,
                 in_channels // groups,
@@ -404,6 +406,17 @@ class FastBlockConv2d(nn.Conv2d):
             groups,
             ortho_params=ortho_params,
         )
+
+    @property
+    def weight(self):
+        if self.training:
+            self.cached_weights = False
+            return self.weight_
+        else:
+            if not self.cached_weights:
+                self._cached_weight = self.weight_.detach().contiguous()
+                self.cached_weights = True
+            return self._cached_weight
 
 
 class FastBlockConvTranspose2D(PaddingConvTranspose2d):
@@ -456,10 +469,12 @@ class FastBlockConvTranspose2D(PaddingConvTranspose2d):
             and (self.kernel_size[1] != self.stride[1])
         ):
             raise ValueError("inner conv must have at least 2 channels")
+        self.cached_weights = False
+        self._cached_weights = None
         del self.weight
         attach_bcop_weight(
             self,
-            "weight",
+            "weight_",
             (
                 in_channels,
                 out_channels // self.groups,
@@ -469,3 +484,14 @@ class FastBlockConvTranspose2D(PaddingConvTranspose2d):
             groups,
             ortho_params=ortho_params,
         )
+
+    @property
+    def weight(self):
+        if self.training:
+            self.cached_weights = False
+            return self.weight_
+        else:
+            if not self.cached_weights:
+                self._cached_weight = self.weight_.detach().contiguous()
+                self.cached_weights = True
+            return self._cached_weight

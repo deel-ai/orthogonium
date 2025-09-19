@@ -75,6 +75,8 @@ class BcopRkoConv2d(nn.Conv2d):
         self.intermediate_channels = max(
             in_channels, out_channels // (self.stride[0] * self.stride[1])
         )
+        self.cached_weights = False
+        self._cached_weights = None
         del self.weight
         attach_bcop_weight(
             self,
@@ -105,14 +107,19 @@ class BcopRkoConv2d(nn.Conv2d):
     @property
     def weight(self):
         if self.training:
+            self.cached_weights = False
             return fast_matrix_conv(
                 self.weight_1, self.weight_2, self.groups
             ).contiguous()
         else:
-            with parametrize.cached():
-                return fast_matrix_conv(
-                    self.weight_1, self.weight_2, self.groups
-                ).contiguous()
+            if not self.cached_weights:
+                self._cached_weight = (
+                    fast_matrix_conv(self.weight_1, self.weight_2, self.groups)
+                    .detach()
+                    .contiguous()
+                )
+                self.cached_weights = True
+            return self._cached_weight
 
 
 class BcopRkoConvTranspose2d(PaddingConvTranspose2d):
@@ -182,6 +189,8 @@ class BcopRkoConvTranspose2d(PaddingConvTranspose2d):
             #     "transposed convolutions",
             #     RuntimeWarning,
             # )
+        self.cached_weights = False
+        self._cached_weights = None
         del self.weight
         attach_bcop_weight(
             self,
@@ -217,3 +226,19 @@ class BcopRkoConvTranspose2d(PaddingConvTranspose2d):
             with parametrize.cached():
                 kernel = fast_matrix_conv(self.weight_1, self.weight_2, self.groups)
         return kernel.contiguous()
+
+    @property
+    def weight(self):
+        if self.training:
+            self.cached_weights = False
+            kernel = fast_matrix_conv(self.weight_1, self.weight_2, self.groups)
+            return kernel.contiguous()
+        else:
+            if not self.cached_weights:
+                self._cached_weight = (
+                    fast_matrix_conv(self.weight_1, self.weight_2, self.groups)
+                    .detach()
+                    .contiguous()
+                )
+                self.cached_weights = True
+            return self._cached_weight
