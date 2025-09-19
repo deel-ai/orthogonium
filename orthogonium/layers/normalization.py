@@ -470,6 +470,8 @@ class LipFactor(nn.Module, ScaledLipschitzModule):
         ScaledLipschitzModule.__init__(self, factory)
 
     def get_scaling_factor(self, training: bool):
+        if self.factory is None:
+            return 1.0
         return self.factory.get_current_product_value(training)
 
     def forward(self, x):
